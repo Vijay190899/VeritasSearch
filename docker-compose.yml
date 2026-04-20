@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: veritas-searxng
+    ports:
+      - "8888:8080"
+    environment:
+      - SEARXNG_SECRET_KEY=veritas-local-dev-secret-change-in-prod
+    volumes:
+      - ./searxng:/etc/searxng
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: veritas-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - OLLAMA_NUM_GPU=1
+      - OLLAMA_GPU_LAYERS=35
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: veritas-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - SEARXNG_URL=http://searxng:8080/search
+    depends_on:
+      - ollama
+      - searxng
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
