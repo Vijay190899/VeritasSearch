@@ -10,21 +10,10 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL = "phi3.5:latest"
 
 REPORT_PROMPT = """\
-You are a fact-checking reporter. Answer the user's question directly and confidently using the evidence below.
-
 Question: {query}
+Evidence: {audit_summary}
 
-Evidence (JSON):
-{audit_summary}
-
-Instructions:
-- FIRST sentence: give a direct YES/NO/MIXED answer to the question in plain language (1 sentence max).
-- THEN write 2-4 more sentences explaining the key evidence and which sources support it.
-- Total: 3-5 plain sentences. No bullet points. No headers. No markdown.
-- For claims with consensus >= 0.5, state them as confirmed by the listed source domains.
-- For claims with consensus < 0.5 but some support, say evidence is mixed but leans toward X.
-- Be confident and specific — cite domain names, not vague language.
-- Never invent facts. Never add information not in the evidence above.
+Write ONE sentence. Start with YES, NO, or MIXED. State your verdict and name 1-2 source domains.
 """
 
 
@@ -81,13 +70,13 @@ class ReporterAgent:
                     "model": self.model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"num_predict": 250, "temperature": 0.2},
+                    "options": {"num_predict": 80, "temperature": 0.1},
                 },
             )
             resp.raise_for_status()
             raw = resp.json().get("response", "").strip()
             # Truncate any runaway output at a natural sentence boundary
-            answer_text = _trim_to_sentences(raw, max_sentences=6)
+            answer_text = _trim_to_sentences(raw, max_sentences=2)
         except Exception:
             answer_text = _synthesize_fallback(query, verdicts)
 

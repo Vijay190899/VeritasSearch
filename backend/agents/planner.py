@@ -12,16 +12,9 @@ OLLAMA_MODEL = "phi3.5:latest"
 # No JSON example in the prompt — that confuses phi3.5.
 # format:"json" guarantees structurally valid JSON output.
 DECOMPOSE_PROMPT = """\
-You are a fact-checking assistant.
-
-Decompose the user query into 3 to 5 short, independently verifiable claims.
-
-Return a JSON object with a "claims" array. Each claim must have:
-- "id": short string like "c1"
-- "text": one declarative sentence that can be proven true or false
-- "search_query": a concise web-search query to verify this claim
-
-User query: {query}
+Break this query into 2 to 3 verifiable factual claims.
+Return JSON: {{"claims":[{{"id":"c1","text":"declarative sentence","search_query":"web search terms"}}]}}
+Query: {query}
 """
 
 

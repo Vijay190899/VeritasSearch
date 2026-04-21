@@ -612,9 +612,9 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* Answer text — max 4 sentences, no verbose extras */}
+                {/* One-line answer */}
                 <p style={{ fontSize: 15, fontWeight: 500, color: "#e2e8f0", lineHeight: 1.65, margin: 0 }}>
-                  {report.answer}
+                  {report.short_answer || report.answer}
                 </p>
 
                 {/* Top sources right below the answer */}

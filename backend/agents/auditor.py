@@ -19,36 +19,13 @@ OLLAMA_MODEL = "phi3.5:latest"
 CONSENSUS_THRESHOLD = 0.60
 
 AUDIT_PROMPT = """\
-You are a fact-checking auditor. Read the text and decide if it SUPPORTS or REFUTES the claim.
-
 Claim: {claim_text}
+Text: {snippet}
 
-Text:
-{snippet}
+SUPPORTS = text backs the claim. REFUTES = text contradicts the claim. IRRELEVANT = topic completely unrelated.
+Prefer SUPPORTS or REFUTES over IRRELEVANT whenever the topic overlaps.
 
-Rules:
-- SUPPORTS: the text contains evidence that the claim is true.
-- REFUTES: the text contains evidence that the claim is false.
-- IRRELEVANT: the text has no information about the claim topic at all.
-- If the text is even partially related to the claim topic, prefer SUPPORTS or REFUTES over IRRELEVANT.
-- confidence: how certain you are (0.0 to 1.0).
-- quote: copy the most relevant sentence from the text (max 120 chars).
-
-Examples:
-Claim: "Aspirin reduces the risk of heart attacks."
-Text: "Daily low-dose aspirin therapy has been shown in multiple clinical trials to reduce the incidence of myocardial infarction in high-risk patients."
-Output: {{"verdict": "SUPPORTS", "confidence": 0.92, "quote": "Daily low-dose aspirin therapy has been shown in multiple clinical trials to reduce the incidence of myocardial infarction"}}
-
-Claim: "Vitamin C cures the common cold."
-Text: "A 2013 Cochrane review found that regular vitamin C supplementation did not reduce the incidence of colds in the general population."
-Output: {{"verdict": "REFUTES", "confidence": 0.88, "quote": "regular vitamin C supplementation did not reduce the incidence of colds in the general population"}}
-
-Claim: "Electric cars are more efficient than gasoline cars."
-Text: "The latest smartphone models feature improved camera sensors and longer battery life compared to previous generations."
-Output: {{"verdict": "IRRELEVANT", "confidence": 0.95, "quote": ""}}
-
-Respond ONLY with valid JSON:
-{{"verdict": "SUPPORTS", "confidence": 0.85, "quote": "sentence from text"}}
+{{"verdict":"SUPPORTS","confidence":0.9,"quote":"exact sentence from text under 100 chars"}}
 """
 
 
