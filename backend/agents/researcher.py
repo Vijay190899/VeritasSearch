@@ -23,9 +23,20 @@ _NOISE_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# Prompt-injection markers: drop any paragraph containing these to protect the auditor LLM.
+_INJECTION_PATTERNS = re.compile(
+    r"you are an (ai|llm|language model|assistant|chatbot)|"
+    r"ignore (previous|above|prior|all) instructions|"
+    r"(system|user|assistant) prompt|"
+    r"<\|im_start\|>|<\|im_end\|>|\[INST\]|\[/INST\]|"
+    r"disregard (previous|above)|forget (your|all) (previous|prior)|"
+    r"new instructions:|from now on you",
+    re.IGNORECASE,
+)
+
 
 def _clean_content(text: str) -> str:
-    """Remove navigation/boilerplate lines from crawled markdown."""
+    """Remove navigation/boilerplate/prompt-injection paragraphs from crawled markdown."""
     lines = text.splitlines()
     seen: set[str] = set()
     out: list[str] = []
@@ -33,12 +44,14 @@ def _clean_content(text: str) -> str:
         s = line.strip()
         if not s:
             continue
-        if len(s) < 30 and not s[-1] in ".!?:":
+        if len(s) < 30 and s[-1] not in ".!?:":
             continue
         alpha = sum(c.isalpha() for c in s)
         if alpha / max(len(s), 1) < 0.45:
             continue
         if _NOISE_PATTERNS.search(s):
+            continue
+        if _INJECTION_PATTERNS.search(s):
             continue
         if s in seen:
             continue

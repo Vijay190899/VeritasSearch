@@ -72,6 +72,13 @@ def build_graph(
             }
         try:
             report = await reporter.synthesize(state["query"], state["audit_result"])
+            # Hard guard: if answer is unreasonably long, the LLM was hijacked —
+            # rebuild it from audit data directly.
+            if len(report.get("answer", "")) > 400:
+                from agents.reporter import _synthesize_answer
+                safe = _synthesize_answer("", state["audit_result"].get("verdicts", []))
+                report["answer"] = safe
+                report["short_answer"] = safe
             return {"report": report}
         except Exception as exc:
             return {"report": {"answer": f"Report error: {exc}", "trust_score": 0.0}}
