@@ -5,7 +5,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -149,7 +149,15 @@ class AuditorAgent:
     def _aggregate_trust(self, verdicts: list[ClaimVerdict]) -> float:
         if not verdicts:
             return 0.0
-        return round(sum(v.provenance_score for v in verdicts) / len(verdicts), 3)
+        # Weight each claim by how many sources it has evidence from.
+        # Claims with more evidence drive the score; unsupported ones have minimal pull.
+        weighted_sum = 0.0
+        total_weight = 0.0
+        for v in verdicts:
+            w = max(1, len(v.supports) + len(v.refutes))
+            weighted_sum += v.provenance_score * w
+            total_weight += w
+        return round(weighted_sum / total_weight, 3)
 
     async def aclose(self) -> None:
         await self._client.aclose()

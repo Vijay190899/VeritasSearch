@@ -8,8 +8,11 @@ interface EvidenceMapProps {
 }
 
 const CLAIM_COLORS = ["#10b981", "#6366f1", "#a855f7", "#f59e0b", "#ec4899"];
-const CANVAS_W = 800;
-const CANVAS_H = 360;
+const CANVAS_W = 1100;
+const CANVAS_H = 480;
+const NODE_W   = 190;  // claim rect half-width * 2
+const NODE_H   = 56;   // claim rect height
+const DOM_R    = 32;   // domain circle radius
 
 function buildGraph(verdicts: ClaimVerdict[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes: GraphNode[] = [];
@@ -57,7 +60,7 @@ function layoutNodes(nodes: GraphNode[], verdicts: ClaimVerdict[]): Map<string, 
     domains.forEach((domain, i) => {
       if (positions.has(domain)) return;
       const angle = (Math.PI / (domains.length + 1)) * (i + 1);
-      const radius = 115;
+      const radius = 135;
       const side = i % 2 === 0 ? 1 : -1;
       positions.set(domain, {
         x: claimPos.x + Math.cos(angle) * radius * side,
@@ -91,8 +94,7 @@ export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
         viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
         width="100%"
         height={CANVAS_H}
-        className="rounded-xl"
-        style={{ background: "rgba(255,255,255,0.02)" }}
+        style={{ background: "rgba(255,255,255,0.015)", borderRadius: 16 }}
         aria-hidden="true"
       >
         <defs>
@@ -140,8 +142,8 @@ export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
           const len = Math.sqrt(dx * dx + dy * dy);
           const ux = dx / len;
           const uy = dy / len;
-          const endX = tgt.x - ux * 22;
-          const endY = tgt.y - uy * 22;
+          const endX = tgt.x - ux * DOM_R;
+          const endY = tgt.y - uy * DOM_R;
 
           return (
             <line
@@ -169,16 +171,33 @@ export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
           const fill = isClaim ? (claimColor! + "20") : (domainColor + "18");
           const stroke = isClaim ? claimColor! : domainColor;
 
+          // Word-wrap claim label into two lines of ≤26 chars each
+          const words   = node.label.split(" ");
+          const lines: string[] = [];
+          let cur = "";
+          for (const w of words) {
+            if ((cur + (cur ? " " : "") + w).length > 26) {
+              if (cur) lines.push(cur);
+              cur = w;
+            } else {
+              cur = cur ? cur + " " + w : w;
+            }
+          }
+          if (cur) lines.push(cur);
+          const lineCount = Math.min(lines.length, 3);
+          const lineH = 12;
+          const rectH = Math.max(NODE_H, lineCount * lineH + 24);
+
           return (
             <g key={node.id} transform={`translate(${pos.x},${pos.y})`}>
               {isClaim ? (
                 <>
                   <rect
-                    x={-65}
-                    y={-20}
-                    width={130}
-                    height={40}
-                    rx={10}
+                    x={-NODE_W / 2}
+                    y={-rectH / 2}
+                    width={NODE_W}
+                    height={rectH}
+                    rx={12}
                     fill={fill}
                     stroke={stroke}
                     strokeWidth="1.5"
@@ -186,18 +205,26 @@ export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
                   />
                   <text
                     textAnchor="middle"
-                    dominantBaseline="central"
-                    fill="#e5e7eb"
-                    fontSize={9}
-                    fontFamily="var(--font-mono), monospace"
+                    fill="#f1f5f9"
+                    fontSize={10}
+                    fontFamily="var(--font-sans), system-ui, sans-serif"
+                    fontWeight="500"
                   >
-                    {node.label.slice(0, 28)}
+                    {lines.slice(0, 3).map((line, li) => (
+                      <tspan
+                        key={li}
+                        x="0"
+                        dy={li === 0 ? -(lineCount - 1) * lineH / 2 : lineH}
+                      >
+                        {line}
+                      </tspan>
+                    ))}
                   </text>
                 </>
               ) : (
                 <>
                   <circle
-                    r={22}
+                    r={DOM_R}
                     fill={fill}
                     stroke={stroke}
                     strokeWidth="1.5"
@@ -206,11 +233,11 @@ export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
                   <text
                     textAnchor="middle"
                     dominantBaseline="central"
-                    fill="#d1d5db"
-                    fontSize={8}
+                    fill="#e2e8f0"
+                    fontSize={8.5}
                     fontFamily="var(--font-mono), monospace"
                   >
-                    {node.label.slice(0, 14)}
+                    {node.label}
                   </text>
                 </>
               )}
@@ -219,13 +246,13 @@ export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
         })}
       </svg>
 
-      <div className="flex gap-5 mt-3 px-1 text-xs text-gray-600">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500/25 border border-emerald-500/60" aria-hidden="true" />
+      <div style={{ display: "flex", gap: 20, marginTop: 12, paddingLeft: 4 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#64748b" }}>
+          <span style={{ width: 10, height: 10, borderRadius: 3, background: "rgba(16,185,129,0.25)", border: "1px solid rgba(16,185,129,0.6)", display: "inline-block" }} />
           Supports claim
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-3 rounded-full bg-red-500/25 border border-red-500/60" aria-hidden="true" />
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#64748b" }}>
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "rgba(239,68,68,0.25)", border: "1px solid rgba(239,68,68,0.6)", display: "inline-block" }} />
           Refutes claim
         </span>
       </div>

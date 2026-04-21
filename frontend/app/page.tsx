@@ -146,7 +146,7 @@ function BrainSphere() {
 
       // ── Draw triangles ────────────────────────────────────────────────────
       for (const { sx, sy, sz, depth, pt } of projected) {
-        const alpha = Math.max(0.08, (depth + 1.6) / 3.2) * 0.9;
+        const alpha = Math.max(0.15, (depth + 1.9) / 2.8);
         const size  = pt.sz * sz;
         const [r, g, b] = pt.color;
 
@@ -220,8 +220,8 @@ function AmbientOrbs() {
     <div ref={aRef} aria-hidden="true" style={{
       position: "fixed", top: 0, left: 0, zIndex: 0, pointerEvents: "none",
       width: 1200, height: 1200, borderRadius: "50%",
-      background: "radial-gradient(circle at center, rgba(16,185,129,0.10) 0%, rgba(99,102,241,0.06) 50%, transparent 70%)",
-      filter: "blur(80px)",
+      background: "radial-gradient(circle at center, rgba(16,185,129,0.28) 0%, rgba(52,211,153,0.12) 35%, rgba(99,102,241,0.15) 60%, transparent 75%)",
+      filter: "blur(70px)",
       willChange: "transform",
     }} />
   );
@@ -246,53 +246,46 @@ function GrainOverlay() {
   );
 }
 
-// ─── Loading overlay ──────────────────────────────────────────────────────────
-function LoadingOverlay({ step, logs }: { step: number; logs: string[] }) {
+// ─── Inline loading card (sphere stays visible behind it) ────────────────────
+function LoadingCard({ step, logs }: { step: number; logs: string[] }) {
   const pct = step >= 0 && step < STEPS.length ? STEPS[step].pct : step >= STEPS.length ? 100 : 5;
-
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-label="Verification in progress"
-      style={{
-        position: "fixed", inset: 0, zIndex: 50,
-        background: "rgba(3,7,18,0.96)",
-        display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center",
-        animation: "fadeIn 0.2s ease both",
-      }}
-    >
-      {/* Progress bar */}
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "rgba(255,255,255,0.04)" }}>
+    <>
+      {/* Slim top progress bar — z-index 10 so it floats above main content */}
+      <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 2, zIndex: 10, background: "rgba(255,255,255,0.04)" }}>
         <div style={{
           height: "100%", width: `${pct}%`,
           background: "linear-gradient(90deg, #059669, #34d399, #6ee7b7)",
           backgroundSize: "200% auto",
           animation: "shimmer 2s linear infinite",
           transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
-          boxShadow: "0 0 14px rgba(52,211,153,0.7), 0 0 4px rgba(52,211,153,0.9)",
+          boxShadow: "0 0 14px rgba(52,211,153,0.8)",
         }} />
       </div>
 
-      <div style={{
-        width: "100%", maxWidth: 400, margin: "0 16px",
-        background: "rgba(13,15,26,0.98)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 22, padding: 32,
-        boxShadow: "0 40px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(52,211,153,0.06)",
-      }}>
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
+      {/* Inline card — sits in normal flow so the canvas sphere shows behind */}
+      <div
+        role="status" aria-live="polite" aria-label="Verification in progress"
+        className="animate-fade-in"
+        style={{
+          marginTop: 32, width: "100%", maxWidth: 400,
+          background: "rgba(5,8,20,0.78)",
+          backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
+          border: "1px solid rgba(52,211,153,0.15)",
+          borderRadius: 22, padding: "28px 32px",
+          boxShadow: "0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(52,211,153,0.04)",
+        }}
+      >
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
           <div className="animate-pulse" style={{
             display: "inline-flex", alignItems: "center", justifyContent: "center",
-            width: 52, height: 52, borderRadius: 16,
-            background: "rgba(16,185,129,0.12)",
-            border: "1px solid rgba(52,211,153,0.25)",
-            marginBottom: 12,
+            width: 48, height: 48, borderRadius: 14,
+            background: "rgba(16,185,129,0.14)", border: "1px solid rgba(52,211,153,0.28)",
+            marginBottom: 10,
           }}>
-            <Shield style={{ width: 24, height: 24, color: "#34d399" }} />
+            <Shield style={{ width: 22, height: 22, color: "#34d399" }} />
           </div>
-          <p style={{ fontSize: 11, fontWeight: 700, color: "#475569", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.14em", textTransform: "uppercase" }}>
             Verifying
           </p>
         </div>
@@ -308,12 +301,12 @@ function LoadingOverlay({ step, logs }: { step: number; logs: string[] }) {
                   width: 30, height: 30, borderRadius: 9, flexShrink: 0,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   background: done || active ? "rgba(16,185,129,0.14)" : "rgba(255,255,255,0.04)",
-                  border: `1px solid ${done || active ? "rgba(52,211,153,0.28)" : "rgba(255,255,255,0.06)"}`,
+                  border: `1px solid ${done || active ? "rgba(52,211,153,0.3)" : "rgba(255,255,255,0.06)"}`,
                   transition: "all 0.35s ease",
                 }}>
-                  {done   ? <CheckCircle style={{ width: 14, height: 14, color: "#34d399" }} />
-                  : active ? <Loader2 className="animate-spin" style={{ width: 14, height: 14, color: "#34d399" }} />
-                  :           <Icon style={{ width: 14, height: 14, color: "#334155" }} />}
+                  {done    ? <CheckCircle style={{ width: 14, height: 14, color: "#34d399" }} />
+                  : active  ? <Loader2 className="animate-spin" style={{ width: 14, height: 14, color: "#34d399" }} />
+                  :            <Icon style={{ width: 14, height: 14, color: "#334155" }} />}
                 </div>
                 <span style={{
                   fontSize: 13,
@@ -334,16 +327,16 @@ function LoadingOverlay({ step, logs }: { step: number; logs: string[] }) {
         </div>
 
         {logs.length > 0 && (
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+          <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
             {logs.slice(-3).map((l, i) => (
-              <p key={i} style={{ fontSize: 11, color: "#334155", fontFamily: "monospace", lineHeight: 1.9 }}>
+              <p key={i} style={{ fontSize: 11, color: "#475569", fontFamily: "monospace", lineHeight: 1.9 }}>
                 <span style={{ color: "#059669", marginRight: 8 }}>›</span>{l}
               </p>
             ))}
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -440,8 +433,6 @@ export default function HomePage() {
       <BrainSphere />
       <AmbientOrbs />
       <GrainOverlay />
-
-      {appState === "loading" && <LoadingOverlay step={step} logs={logs} />}
 
       <main style={{
         flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
@@ -555,6 +546,9 @@ export default function HomePage() {
             &nbsp;·&nbsp; Results include full evidence chain
           </p>
         </div>
+
+        {/* ── Loading card (inline so sphere stays visible) ── */}
+        {appState === "loading" && <LoadingCard step={step} logs={logs} />}
 
         {/* ── Error ── */}
         {appState === "error" && (
