@@ -2,6 +2,14 @@ export interface EvidenceQuote {
   domain: string;
   quote: string;
   stance: "SUPPORTS" | "REFUTES" | "IRRELEVANT";
+  url?: string;
+  title?: string;
+}
+
+export interface TopSource {
+  url: string;
+  title: string;
+  domain: string;
 }
 
 export interface ClaimVerdict {
@@ -13,6 +21,7 @@ export interface ClaimVerdict {
   is_controversial: boolean;
   provenance_score: number;
   evidence_quotes: EvidenceQuote[];
+  top_sources?: TopSource[];
 }
 
 export interface AuditResult {

@@ -104,6 +104,3 @@ def _trim_to_sentences(text: str, max_sentences: int) -> str:
     import re
     sentences = re.split(r"(?<=[.!?])\s+", text.strip())
     return " ".join(sentences[:max_sentences]).strip()
-
-    async def aclose(self) -> None:
-        await self._client.aclose()

@@ -14,7 +14,7 @@ OLLAMA_MODEL = "phi3.5:latest"
 DECOMPOSE_PROMPT = """\
 You are a fact-checking assistant.
 
-Decompose the user query into exactly 3 short, independently verifiable claims.
+Decompose the user query into 3 to 5 short, independently verifiable claims.
 
 Return a JSON object with a "claims" array. Each claim must have:
 - "id": short string like "c1"

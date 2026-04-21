@@ -78,6 +78,14 @@ class AuditorAgent:
     ) -> ClaimVerdict:
         verdict = ClaimVerdict(claim_id=claim["id"], claim_text=claim["text"])
 
+        # Pre-filter to the 5 most semantically relevant docs before calling Ollama.
+        # This halves LLM call count (e.g. 30→15) without losing coverage.
+        if len(docs) > 5:
+            relevant = self.vector_store.query_relevant(claim["text"], claim["id"], top_k=5)
+            relevant_urls = {r["url"] for r in relevant}
+            filtered = [d for d in docs if d.url in relevant_urls]
+            docs = filtered if filtered else docs[:5]
+
         audit_tasks = [self._audit_document(claim["text"], doc) for doc in docs]
         results = await asyncio.gather(*audit_tasks, return_exceptions=True)
 
@@ -87,12 +95,14 @@ class AuditorAgent:
                 if v == "SUPPORTS":
                     verdict.supports.append(doc.domain)
                     verdict.evidence_quotes.append(
-                        {"domain": doc.domain, "quote": result.get("quote", ""), "stance": "SUPPORTS"}
+                        {"domain": doc.domain, "quote": result.get("quote", ""), "stance": "SUPPORTS",
+                         "url": doc.url, "title": doc.title}
                     )
                 elif v == "REFUTES":
                     verdict.refutes.append(doc.domain)
                     verdict.evidence_quotes.append(
-                        {"domain": doc.domain, "quote": result.get("quote", ""), "stance": "REFUTES"}
+                        {"domain": doc.domain, "quote": result.get("quote", ""), "stance": "REFUTES",
+                         "url": doc.url, "title": doc.title}
                     )
 
         total = len(verdict.supports) + len(verdict.refutes)
@@ -135,6 +145,11 @@ class AuditorAgent:
             return {"verdict": "IRRELEVANT", "confidence": 0.0, "quote": ""}
 
     def _verdict_to_dict(self, v: ClaimVerdict) -> dict[str, Any]:
+        top_sources = [
+            {"url": eq["url"], "title": eq["title"], "domain": eq["domain"]}
+            for eq in v.evidence_quotes
+            if eq.get("stance") == "SUPPORTS" and eq.get("url")
+        ][:3]
         return {
             "claim_id": v.claim_id,
             "claim_text": v.claim_text,
@@ -144,6 +159,7 @@ class AuditorAgent:
             "is_controversial": v.is_controversial,
             "provenance_score": round(v.provenance_score, 3),
             "evidence_quotes": v.evidence_quotes,
+            "top_sources": top_sources,
         }
 
     def _aggregate_trust(self, verdicts: list[ClaimVerdict]) -> float:

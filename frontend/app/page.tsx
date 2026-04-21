@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
   Search, Shield, AlertTriangle, CheckCircle, XCircle,
-  Loader2, Globe, Zap, ArrowRight, Sparkles,
+  Loader2, Globe, Zap, ArrowRight, Sparkles, Maximize2, X, ExternalLink,
 } from "lucide-react";
 import EvidenceMap from "@/components/EvidenceMap";
 import TrustMeter from "@/components/TrustMeter";
@@ -65,11 +65,37 @@ function BrainSphere() {
     };
 
     const pts: Pt[] = Array.from({ length: N }, (_, i) => {
-      const y   = 1 - (i / (N - 1)) * 2;
-      const r   = Math.sqrt(Math.max(0, 1 - y * y));
+      // Unit sphere via Fibonacci lattice
+      const uy  = 1 - (i / (N - 1)) * 2;
+      const r0  = Math.sqrt(Math.max(0, 1 - uy * uy));
       const phi = GOLDEN * i;
+      const ux  = Math.cos(phi) * r0;
+      const uz  = Math.sin(phi) * r0;
+
+      // ── Brain deformation ────────────────────────────────────────
+      // 1. Ellipsoid: wider left-right, flatter top-bottom
+      let bx = ux * 1.35;
+      let by = uy * 0.68;
+      let bz = uz * 0.90;
+
+      // 2. Longitudinal fissure — Gaussian groove at top center (ux≈0, uy>0)
+      const groove = Math.exp(-ux * ux * 14) * Math.max(0, uy) * 1.1;
+      by -= groove * 0.40;
+      bx += (bx >= 0 ? 1 : -1) * groove * 0.11;
+
+      // 3. Hemisphere lobe bulge — peak near |ux|=0.45
+      const lobeOff   = Math.abs(ux) - 0.45;
+      const lobeBulge = Math.exp(-lobeOff * lobeOff * 9) * Math.max(0, uy) * 0.18;
+      by += lobeBulge;
+
+      // 4. Wrinkle noise (gyri) — subtle surface bump
+      const bump = Math.sin(ux * 11) * Math.cos(uy * 8 + uz * 5) * 0.038;
+      const len  = Math.sqrt(bx * bx + by * by + bz * bz);
+      if (len > 0) { bx += (bx / len) * bump; by += (by / len) * bump; bz += (bz / len) * bump; }
+      // ─────────────────────────────────────────────────────────────
+
       return {
-        ox: Math.cos(phi) * r, oy: y, oz: Math.sin(phi) * r,
+        ox: bx, oy: by, oz: bz,
         dx: 0, dy: 0, dz: 0,
         vx: 0, vy: 0, vz: 0,
         color: SPHERE_COLORS[i % SPHERE_COLORS.length],
@@ -342,13 +368,14 @@ function LoadingCard({ step, logs }: { step: number; logs: string[] }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function HomePage() {
-  const [query,       setQuery]       = useState("");
-  const [appState,    setAppState]    = useState<AppState>("idle");
-  const [report,      setReport]      = useState<VerificationReport | null>(null);
-  const [audit,       setAudit]       = useState<AuditResult | null>(null);
-  const [step,        setStep]        = useState(-1);
-  const [logs,        setLogs]        = useState<string[]>([]);
-  const [streamError, setStreamError] = useState<string | null>(null);
+  const [query,        setQuery]       = useState("");
+  const [appState,     setAppState]    = useState<AppState>("idle");
+  const [report,       setReport]      = useState<VerificationReport | null>(null);
+  const [audit,        setAudit]       = useState<AuditResult | null>(null);
+  const [step,         setStep]        = useState(-1);
+  const [logs,         setLogs]        = useState<string[]>([]);
+  const [streamError,  setStreamError] = useState<string | null>(null);
+  const [mapExpanded,  setMapExpanded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleVerify = useCallback(async () => {
@@ -685,6 +712,30 @@ export default function HomePage() {
                                 <span style={{ fontSize: 11, color: "#f87171", fontWeight: 600 }}>{v.refutes.length} refuting</span>
                               )}
                             </div>
+                            {/* Top source links */}
+                            {(v.top_sources?.length ?? 0) > 0 && (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
+                                {v.top_sources!.map((src, si) => (
+                                  <a
+                                    key={si}
+                                    href={src.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      display: "flex", alignItems: "center", gap: 5,
+                                      fontSize: 11, color: "#6ee7b7", textDecoration: "none",
+                                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                                    }}
+                                    title={src.title}
+                                  >
+                                    <ExternalLink style={{ width: 10, height: 10, flexShrink: 0 }} />
+                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                                      {src.title && src.title !== src.domain ? src.title.slice(0, 60) : src.domain}
+                                    </span>
+                                  </a>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -706,8 +757,57 @@ export default function HomePage() {
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#34d399", letterSpacing: "0.12em", textTransform: "uppercase" }}>
                     Evidence Map
                   </span>
+                  <button
+                    onClick={() => setMapExpanded(true)}
+                    title="Expand to fullscreen"
+                    style={{
+                      marginLeft: "auto", display: "flex", alignItems: "center", gap: 5,
+                      background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 8, padding: "4px 10px", cursor: "pointer",
+                      fontSize: 11, color: "#64748b",
+                    }}
+                  >
+                    <Maximize2 style={{ width: 11, height: 11 }} />
+                    Expand
+                  </button>
                 </div>
                 <EvidenceMap verdicts={audit!.verdicts} />
+              </div>
+            )}
+
+            {/* Fullscreen Evidence Map overlay */}
+            {mapExpanded && (audit?.verdicts?.length ?? 0) > 0 && (
+              <div
+                style={{
+                  position: "fixed", inset: 0, zIndex: 50,
+                  background: "rgba(3,7,18,0.92)",
+                  backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+                  display: "flex", flexDirection: "column",
+                  padding: "28px 32px",
+                }}
+                onClick={(e) => { if (e.target === e.currentTarget) setMapExpanded(false); }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+                  <Globe style={{ width: 14, height: 14, color: "#34d399" }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                    Evidence Map
+                  </span>
+                  <button
+                    onClick={() => setMapExpanded(false)}
+                    style={{
+                      marginLeft: "auto", display: "flex", alignItems: "center", gap: 5,
+                      background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 8, padding: "5px 12px", cursor: "pointer",
+                      fontSize: 12, color: "#94a3b8",
+                    }}
+                  >
+                    <X style={{ width: 13, height: 13 }} />
+                    Close
+                  </button>
+                </div>
+                <div style={{ flex: 1, overflow: "auto" }}>
+                  <EvidenceMap verdicts={audit!.verdicts} />
+                </div>
               </div>
             )}
           </section>
