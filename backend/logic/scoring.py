@@ -34,8 +34,12 @@ class ProvenanceScorer:
         ai_flatness: float,
     ) -> float:
         total = supports + refutes
-        consensus = supports / total if total > 0 else 0.0
+        # Without at least one supporting or refuting source there is no verdict —
+        # authority and entropy bonuses must not inflate the score to a misleading value.
+        if total == 0:
+            return 0.0
 
+        consensus = supports / total
         authority = self._authority_score(docs)
         entropy_bonus = 1.0 - min(max(ai_flatness, 0.0), 1.0)
 

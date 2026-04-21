@@ -19,15 +19,23 @@ OLLAMA_MODEL = "phi3.5:latest"
 CONSENSUS_THRESHOLD = 0.60
 
 AUDIT_PROMPT = """\
-You are a fact-checking auditor. Determine if the following text SUPPORTS, REFUTES, or is IRRELEVANT to the given claim.
+You are a fact-checking auditor. Read the text and decide if it SUPPORTS or REFUTES the claim.
 
 Claim: {claim_text}
 
-Text (truncated to 800 words):
+Text:
 {snippet}
 
+Rules:
+- SUPPORTS: the text contains evidence that the claim is true.
+- REFUTES: the text contains evidence that the claim is false.
+- IRRELEVANT: the text has no information about the claim topic at all.
+- If the text is even partially related to the claim topic, prefer SUPPORTS or REFUTES over IRRELEVANT.
+- confidence: how certain you are (0.0 to 1.0).
+- quote: copy the most relevant sentence from the text (max 120 chars).
+
 Respond ONLY with valid JSON:
-{{"verdict": "SUPPORTS|REFUTES|IRRELEVANT", "confidence": 0.0-1.0, "quote": "most relevant quote (max 150 chars)"}}
+{{"verdict": "SUPPORTS", "confidence": 0.85, "quote": "sentence from text"}}
 """
 
 

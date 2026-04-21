@@ -222,7 +222,7 @@ function LoadingOverlay({ step, logs }: { step: number; logs: string[] }) {
                 </div>
                 <span style={{
                   fontSize: 13,
-                  color: done ? "#334155" : active ? "#e2e8f0" : "#1e293b",
+                  color: done ? "#4b5563" : active ? "#f1f5f9" : "#64748b",
                   textDecoration: done ? "line-through" : "none",
                   transition: "color 0.3s ease",
                 }}>
@@ -398,7 +398,7 @@ export default function HomePage() {
             </h1>
           </div>
 
-          <p style={{ color: "#475569", fontSize: 15, lineHeight: 1.75, maxWidth: 480, margin: "0 auto" }}>
+          <p style={{ color: "#94a3b8", fontSize: 15, lineHeight: 1.75, maxWidth: 480, margin: "0 auto" }}>
             Every answer arrives with a provenance score and a full evidence chain —
             not just the model&rsquo;s best guess.
           </p>
@@ -459,9 +459,9 @@ export default function HomePage() {
             </button>
           </div>
 
-          <p style={{ textAlign: "center", fontSize: 11, color: "#1e293b", marginTop: 10 }}>
+          <p style={{ textAlign: "center", fontSize: 11, color: "#475569", marginTop: 10 }}>
             Press{" "}
-            <span style={{ color: "#334155", fontFamily: "monospace" }}>↵ Enter</span>
+            <span style={{ color: "#64748b", fontFamily: "monospace" }}>↵ Enter</span>
             {" "}to verify &nbsp;·&nbsp; Results include full evidence chain
           </p>
         </div>
@@ -501,7 +501,7 @@ export default function HomePage() {
             {/* Trust + Answer */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div style={{
-                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.1)",
                 borderRadius: 20, padding: "28px 24px",
                 display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14,
               }}>
@@ -517,14 +517,14 @@ export default function HomePage() {
                     Sources conflict
                   </div>
                 )}
-                <p style={{ fontSize: 11, color: "#1e293b", textAlign: "center" }}>
+                <p style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>
                   {report.source_count ?? 0} sources
                   {(audit?.verdicts?.length ?? 0) > 0 ? ` · ${audit!.verdicts.length} claims` : ""}
                 </p>
               </div>
 
               <div className="md:col-span-2" style={{
-                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.1)",
                 borderRadius: 20, padding: "28px 28px",
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
@@ -533,7 +533,7 @@ export default function HomePage() {
                     Synthesised Answer
                   </span>
                 </div>
-                <p style={{ color: "#cbd5e1", lineHeight: 1.8, fontSize: 14, whiteSpace: "pre-wrap" }}>
+                <p style={{ color: "#e2e8f0", lineHeight: 1.8, fontSize: 14, whiteSpace: "pre-wrap" }}>
                   {report.answer}
                 </p>
               </div>
@@ -542,7 +542,7 @@ export default function HomePage() {
             {/* Claim audit */}
             {(audit?.verdicts?.length ?? 0) > 0 && (
               <div style={{
-                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.1)",
                 borderRadius: 20, padding: "28px 28px",
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
@@ -607,7 +607,7 @@ export default function HomePage() {
             {/* Evidence map */}
             {(audit?.verdicts?.length ?? 0) > 0 && (
               <div style={{
-                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.1)",
                 borderRadius: 20, padding: "28px 28px",
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
@@ -625,7 +625,7 @@ export default function HomePage() {
         {/* ── Suggestions ── */}
         {appState === "idle" && (
           <div className="animate-fade-in" style={{ marginTop: 52, textAlign: "center" }}>
-            <p style={{ fontSize: 11, color: "#1e293b", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 16 }}>
+            <p style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 16 }}>
               Try asking
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 8, maxWidth: 580, margin: "0 auto" }}>
@@ -636,8 +636,8 @@ export default function HomePage() {
                   className="suggestion-chip"
                   style={{
                     display: "flex", alignItems: "center", gap: 6, fontSize: 12,
-                    color: "#334155", background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.06)", borderRadius: 999,
+                    color: "#94a3b8", background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999,
                     padding: "8px 16px", cursor: "pointer",
                     transition: "all 0.15s ease",
                   }}
