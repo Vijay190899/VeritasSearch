@@ -97,8 +97,12 @@ class AuditorAgent:
 
         total = len(verdict.supports) + len(verdict.refutes)
         verdict.consensus_score = len(verdict.supports) / total if total > 0 else 0.0
+        # Conflicting only when BOTH sides have evidence and neither dominates.
+        # All-refute or all-support is NOT conflicting — it's a clear verdict.
         verdict.is_controversial = (
-            len(verdict.refutes) > 0 and verdict.consensus_score < 0.75
+            len(verdict.supports) > 0
+            and len(verdict.refutes) > 0
+            and 0.25 < verdict.consensus_score < 0.75
         )
 
         ai_scores = [self.detector.score(doc.content) for doc in docs]
@@ -109,7 +113,8 @@ class AuditorAgent:
             ai_flatness=sum(ai_scores) / len(ai_scores) if ai_scores else 0.5,
         )
 
-        if verdict.consensus_score < CONSENSUS_THRESHOLD and total >= 3:
+        if (len(verdict.supports) > 0 and len(verdict.refutes) > 0
+                and verdict.consensus_score < CONSENSUS_THRESHOLD and total >= 3):
             verdict.is_controversial = True
 
         return verdict
