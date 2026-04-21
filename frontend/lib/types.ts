@@ -32,6 +32,7 @@ export interface AuditResult {
 
 export interface VerificationReport {
   answer: string;
+  short_answer?: string;
   trust_score: number;
   has_conflicts: boolean;
   verdicts: ClaimVerdict[];

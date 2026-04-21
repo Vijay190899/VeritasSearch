@@ -10,7 +10,7 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL = "phi3.5:latest"
 
 REPORT_PROMPT = """\
-You are a fact-checking reporter. Write a clear, direct answer to the user's question using ONLY the evidence below.
+You are a fact-checking reporter. Answer the user's question directly and confidently using the evidence below.
 
 Question: {query}
 
@@ -18,12 +18,13 @@ Evidence (JSON):
 {audit_summary}
 
 Instructions:
-- Write exactly 3-5 plain sentences. No bullet points. No headers. No markdown.
-- For each claim with consensus >= 0.5, state it as supported with the source domains.
-- For each claim with consensus < 0.5, state the evidence is mixed or insufficient.
-- If a claim is controversial (has both supports and refutes), mention the disagreement.
+- FIRST sentence: give a direct YES/NO/MIXED answer to the question in plain language (1 sentence max).
+- THEN write 2-4 more sentences explaining the key evidence and which sources support it.
+- Total: 3-5 plain sentences. No bullet points. No headers. No markdown.
+- For claims with consensus >= 0.5, state them as confirmed by the listed source domains.
+- For claims with consensus < 0.5 but some support, say evidence is mixed but leans toward X.
+- Be confident and specific — cite domain names, not vague language.
 - Never invent facts. Never add information not in the evidence above.
-- End your answer when the facts are stated. Do not add closing remarks.
 """
 
 
@@ -90,8 +91,13 @@ class ReporterAgent:
         except Exception as exc:
             answer_text = f"Report generation failed: {exc}"
 
+        import re as _re
+        sentences = _re.split(r"(?<=[.!?])\s+", answer_text.strip())
+        short_answer = sentences[0].strip() if sentences else answer_text
+
         return {
             "answer": answer_text,
+            "short_answer": short_answer,
             "trust_score": audit_result.get("overall_trust", 0.0),
             "has_conflicts": audit_result.get("has_conflicts", False),
             "verdicts": verdicts,

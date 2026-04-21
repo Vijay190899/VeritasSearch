@@ -12,8 +12,8 @@ from db.vector_store import VectorStore
 from models import EvidenceDocument
 
 SEARXNG_URL = "http://localhost:8888/search"
-MAX_CONCURRENT_SCRAPES = 5
-SCRAPE_TIMEOUT = 20.0
+MAX_CONCURRENT_SCRAPES = 8
+SCRAPE_TIMEOUT = 12.0
 
 
 class ResearcherAgent:

@@ -73,23 +73,33 @@ function BrainSphere() {
       const uz  = Math.sin(phi) * r0;
 
       // ── Brain deformation ────────────────────────────────────────
-      // 1. Ellipsoid: wider left-right, flatter top-bottom
-      let bx = ux * 1.35;
-      let by = uy * 0.68;
-      let bz = uz * 0.90;
+      // 1. Strong ellipsoid: wide left-right, clearly flatter top-bottom
+      let bx = ux * 1.55;
+      let by = uy * 0.60;
+      let bz = uz * 0.88;
 
-      // 2. Longitudinal fissure — Gaussian groove at top center (ux≈0, uy>0)
-      const groove = Math.exp(-ux * ux * 14) * Math.max(0, uy) * 1.1;
-      by -= groove * 0.40;
-      bx += (bx >= 0 ? 1 : -1) * groove * 0.11;
+      // 2. Deep longitudinal fissure — wide enough to visually separate two lobes
+      const groove = Math.exp(-ux * ux * 22) * Math.max(0, uy) * 1.25;
+      by -= groove * 0.62;                                  // pull top-center down sharply
+      bx += (ux >= 0 ? 1 : -1) * groove * 0.18;           // push each lobe outward
 
-      // 3. Hemisphere lobe bulge — peak near |ux|=0.45
-      const lobeOff   = Math.abs(ux) - 0.45;
-      const lobeBulge = Math.exp(-lobeOff * lobeOff * 9) * Math.max(0, uy) * 0.18;
+      // 3. Two-lobe bulge — hemispheres swell above and outward
+      const lobeOff   = Math.abs(ux) - 0.44;
+      const lobeBulge = Math.exp(-lobeOff * lobeOff * 7) * Math.max(0, uy) * 0.28;
       by += lobeBulge;
 
-      // 4. Wrinkle noise (gyri) — subtle surface bump
-      const bump = Math.sin(ux * 11) * Math.cos(uy * 8 + uz * 5) * 0.038;
+      // 4. Flatten the crown (top of each lobe is slightly rounded, not pointy)
+      const crownFlatten = Math.exp(-Math.pow(uy - 0.55, 2) * 18) * 0.12;
+      by -= crownFlatten;
+
+      // 5. Flatten bottom (brain stem/cerebellum region — not a full sphere)
+      if (uy < -0.35) by += (-uy - 0.35) * 0.30;
+
+      // 6. Wrinkle noise (gyri) — asymmetric so each lobe looks distinct
+      const bump = (
+        Math.sin(ux * 13 + uz * 3) * Math.cos(uy * 10) * 0.048
+        + Math.sin(ux * 7 - uz * 9) * Math.sin(uy * 6) * 0.028
+      );
       const len  = Math.sqrt(bx * bx + by * by + bz * bz);
       if (len > 0) { bx += (bx / len) * bump; by += (by / len) * bump; bz += (bz / len) * bump; }
       // ─────────────────────────────────────────────────────────────
@@ -114,7 +124,23 @@ function BrainSphere() {
     let rotY = 0;
     let raf  = 0;
 
+    // Scroll-explosion state (local to this effect closure)
+    let scrollImp   = 0;
+    let lastScrollY = window.scrollY;
+
     function tick() {
+      // Decay and apply outward scroll impulse
+      if (scrollImp > 0.002) {
+        for (const p of pts) {
+          const ml = Math.sqrt(p.ox * p.ox + p.oy * p.oy + p.oz * p.oz);
+          if (ml > 0) {
+            p.vx += (p.ox / ml) * scrollImp;
+            p.vy += (p.oy / ml) * scrollImp;
+            p.vz += (p.oz / ml) * scrollImp;
+          }
+        }
+        scrollImp *= 0.86;
+      }
       ctx.clearRect(0, 0, W, H);
 
       rotY += 0.0025;
@@ -201,15 +227,22 @@ function BrainSphere() {
     };
     const onMouseMove  = (e: MouseEvent) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
     const onMouseLeave = () => { mouseRef.current = { x: -99999, y: -99999 }; };
+    const onScroll     = () => {
+      const delta = window.scrollY - lastScrollY;
+      lastScrollY = window.scrollY;
+      if (delta > 1) scrollImp = Math.min(scrollImp + delta * 0.016, 0.45);
+    };
 
     window.addEventListener("resize",     onResize);
     window.addEventListener("mousemove",  onMouseMove);
     window.addEventListener("mouseleave", onMouseLeave);
+    window.addEventListener("scroll",     onScroll, { passive: true });
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize",     onResize);
       window.removeEventListener("mousemove",  onMouseMove);
       window.removeEventListener("mouseleave", onMouseLeave);
+      window.removeEventListener("scroll",     onScroll);
     };
   }, []);
 
@@ -376,6 +409,7 @@ export default function HomePage() {
   const [logs,         setLogs]        = useState<string[]>([]);
   const [streamError,  setStreamError] = useState<string | null>(null);
   const [mapExpanded,  setMapExpanded] = useState(false);
+  const [mapZoom,      setMapZoom]     = useState(1);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleVerify = useCallback(async () => {
@@ -609,7 +643,43 @@ export default function HomePage() {
             className="animate-fade-slide-up"
             style={{ marginTop: 48, width: "100%", maxWidth: 900, display: "flex", flexDirection: "column", gap: 16 }}
           >
-            {/* Trust score hero */}
+            {/* ── Direct Answer card ── */}
+            {report.answer && (report.trust_score ?? 0) > 0 && (
+              <div style={{
+                background: "rgba(16,185,129,0.07)",
+                border: "1px solid rgba(52,211,153,0.25)",
+                borderRadius: 20, padding: "22px 28px",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <CheckCircle style={{ width: 13, height: 13, color: "#34d399" }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#34d399", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                    Direct Answer
+                  </span>
+                </div>
+                {/* Short one-liner */}
+                <p style={{ fontSize: 16, fontWeight: 600, color: "#f1f5f9", lineHeight: 1.5, margin: 0 }}>
+                  {report.short_answer ?? report.answer.split(/(?<=[.!?])\s+/)[0]}
+                </p>
+                {/* Full answer expandable below if it has more content */}
+                {report.answer.length > (report.short_answer ?? "").length + 5 && (
+                  <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.7, marginTop: 10 }}>
+                    {report.answer}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* ── Error / no-evidence message ── */}
+            {(report.trust_score ?? 0) === 0 && report.answer && (
+              <div style={{
+                background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.15)",
+                borderRadius: 16, padding: "16px 20px",
+              }}>
+                <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>{report.answer}</p>
+              </div>
+            )}
+
+            {/* ── Trust score hero ── */}
             <div style={{
               background: "rgba(255,255,255,0.025)",
               border: "1px solid rgba(255,255,255,0.1)",
@@ -640,19 +710,6 @@ export default function HomePage() {
                   {(audit?.verdicts?.length ?? 0) > 0 ? ` · ${audit!.verdicts.length} claims` : ""}
                 </div>
               </div>
-
-              {/* Show "unable to verify" message when trust = 0 */}
-              {(report.trust_score ?? 0) === 0 && report.answer && (
-                <p style={{
-                  fontSize: 13, color: "#64748b", textAlign: "center",
-                  maxWidth: 480, lineHeight: 1.6,
-                  background: "rgba(239,68,68,0.04)",
-                  border: "1px solid rgba(239,68,68,0.12)",
-                  borderRadius: 12, padding: "12px 16px",
-                }}>
-                  {report.answer}
-                </p>
-              )}
             </div>
 
             {/* Claim audit */}
@@ -714,26 +771,37 @@ export default function HomePage() {
                             </div>
                             {/* Top source links */}
                             {(v.top_sources?.length ?? 0) > 0 && (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
-                                {v.top_sources!.map((src, si) => (
-                                  <a
-                                    key={si}
-                                    href={src.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    style={{
-                                      display: "flex", alignItems: "center", gap: 5,
-                                      fontSize: 11, color: "#6ee7b7", textDecoration: "none",
-                                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                                    }}
-                                    title={src.title}
-                                  >
-                                    <ExternalLink style={{ width: 10, height: 10, flexShrink: 0 }} />
-                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {src.title && src.title !== src.domain ? src.title.slice(0, 60) : src.domain}
-                                    </span>
-                                  </a>
-                                ))}
+                              <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                                <p style={{ fontSize: 10, fontWeight: 600, color: "#475569", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
+                                  Sources
+                                </p>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                                  {v.top_sources!.map((src, si) => (
+                                    <a
+                                      key={si}
+                                      href={src.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      style={{
+                                        display: "flex", alignItems: "flex-start", gap: 7,
+                                        fontSize: 12, color: "#6ee7b7", textDecoration: "none",
+                                        background: "rgba(52,211,153,0.04)",
+                                        border: "1px solid rgba(52,211,153,0.12)",
+                                        borderRadius: 8, padding: "6px 10px",
+                                        transition: "background 0.15s",
+                                      }}
+                                      title={src.url}
+                                    >
+                                      <ExternalLink style={{ width: 11, height: 11, flexShrink: 0, marginTop: 1 }} />
+                                      <span style={{ lineHeight: 1.4 }}>
+                                        <span style={{ display: "block", fontWeight: 600, color: "#a7f3d0" }}>
+                                          {src.title && src.title !== src.domain ? src.title.slice(0, 72) : src.domain}
+                                        </span>
+                                        <span style={{ fontSize: 10, color: "#475569" }}>{src.domain}</span>
+                                      </span>
+                                    </a>
+                                  ))}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -775,38 +843,59 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* Fullscreen Evidence Map overlay */}
+            {/* Fullscreen Evidence Map overlay with zoom */}
             {mapExpanded && (audit?.verdicts?.length ?? 0) > 0 && (
               <div
                 style={{
                   position: "fixed", inset: 0, zIndex: 50,
-                  background: "rgba(3,7,18,0.92)",
+                  background: "rgba(3,7,18,0.94)",
                   backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
                   display: "flex", flexDirection: "column",
-                  padding: "28px 32px",
+                  padding: "24px 28px",
                 }}
-                onClick={(e) => { if (e.target === e.currentTarget) setMapExpanded(false); }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+                {/* Header row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexShrink: 0 }}>
                   <Globe style={{ width: 14, height: 14, color: "#34d399" }} />
                   <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399", letterSpacing: "0.12em", textTransform: "uppercase" }}>
                     Evidence Map
                   </span>
-                  <button
-                    onClick={() => setMapExpanded(false)}
-                    style={{
-                      marginLeft: "auto", display: "flex", alignItems: "center", gap: 5,
-                      background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
-                      borderRadius: 8, padding: "5px 12px", cursor: "pointer",
-                      fontSize: 12, color: "#94a3b8",
-                    }}
-                  >
-                    <X style={{ width: 13, height: 13 }} />
-                    Close
-                  </button>
+
+                  {/* Zoom controls */}
+                  <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                    <button
+                      onClick={() => setMapZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2)))}
+                      style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer", color: "#94a3b8", fontSize: 18, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}
+                      title="Zoom out"
+                    >−</button>
+                    <span style={{ fontSize: 11, color: "#64748b", minWidth: 36, textAlign: "center", fontFamily: "monospace" }}>
+                      {Math.round(mapZoom * 100)}%
+                    </span>
+                    <button
+                      onClick={() => setMapZoom(z => Math.min(3, +(z + 0.25).toFixed(2)))}
+                      style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer", color: "#94a3b8", fontSize: 18, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}
+                      title="Zoom in"
+                    >+</button>
+                    <button
+                      onClick={() => { setMapExpanded(false); setMapZoom(1); }}
+                      style={{
+                        marginLeft: 8, display: "flex", alignItems: "center", gap: 5,
+                        background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 8, padding: "5px 12px", cursor: "pointer",
+                        fontSize: 12, color: "#94a3b8",
+                      }}
+                    >
+                      <X style={{ width: 13, height: 13 }} />
+                      Close
+                    </button>
+                  </div>
                 </div>
+
+                {/* Scrollable zoomed canvas */}
                 <div style={{ flex: 1, overflow: "auto" }}>
-                  <EvidenceMap verdicts={audit!.verdicts} />
+                  <div style={{ zoom: mapZoom, transformOrigin: "top left" }}>
+                    <EvidenceMap verdicts={audit!.verdicts} />
+                  </div>
                 </div>
               </div>
             )}

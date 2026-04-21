@@ -1,16 +1,15 @@
 """Provenance scoring: calculates S_p based on consensus, authority, and AI entropy."""
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agents.researcher import EvidenceDocument
 
-# Weight coefficients for the provenance score formula
-W_CONSENSUS = 0.50
-W_AUTHORITY = 0.30
-W_ENTROPY = 0.20
+# Weight coefficients — consensus-heavy so partial support still scores well
+W_CONSENSUS = 0.58
+W_AUTHORITY = 0.25
+W_ENTROPY   = 0.17
 
 AUTHORITATIVE_TLDS = {".edu", ".gov", ".org", ".ac.uk", ".ac.in"}
 HIGH_AUTHORITY_DOMAINS = {
@@ -48,6 +47,11 @@ class ProvenanceScorer:
             + W_AUTHORITY * authority
             + W_ENTROPY * entropy_bonus
         )
+        # Supporting-evidence presence bonus: if any source supports the claim,
+        # add a floor bonus so partial support isn't punished by low-authority domains.
+        if supports > 0:
+            bonus = 0.10 + min(supports - 1, 3) * 0.025  # 0.10 for 1 src, up to 0.175 for 4+
+            score = min(1.0, score + bonus)
         return round(min(max(score, 0.0), 1.0), 4)
 
     def _authority_score(self, docs: list["EvidenceDocument"]) -> float:
@@ -57,7 +61,7 @@ class ProvenanceScorer:
         return sum(scores) / len(scores)
 
     def _domain_authority(self, domain: str, is_https: bool) -> float:
-        score = 0.3
+        score = 0.35  # raised floor — even unknown HTTPS domains have credibility
         if is_https:
             score += 0.1
         if any(domain.endswith(tld) for tld in AUTHORITATIVE_TLDS):

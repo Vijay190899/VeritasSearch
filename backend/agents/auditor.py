@@ -125,7 +125,7 @@ class AuditorAgent:
         return verdict
 
     async def _audit_document(self, claim_text: str, doc: EvidenceDocument) -> dict[str, Any]:
-        prompt = AUDIT_PROMPT.format(claim_text=claim_text, snippet=doc.snippet(800))
+        prompt = AUDIT_PROMPT.format(claim_text=claim_text, snippet=doc.snippet(1100))
         raw = "{}"
         try:
             resp = await self._client.post(
