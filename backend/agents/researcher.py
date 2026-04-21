@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -14,6 +15,36 @@ from models import EvidenceDocument
 SEARXNG_URL = "http://localhost:8888/search"
 MAX_CONCURRENT_SCRAPES = 8
 SCRAPE_TIMEOUT = 12.0
+
+_NOISE_PATTERNS = re.compile(
+    r"cookie|gdpr|privacy policy|accept all|subscribe|newsletter|"
+    r"sign in|log in|log out|advertisement|terms of service|all rights reserved|"
+    r"skip to content|jump to|click here|read more|see more|show more",
+    re.IGNORECASE,
+)
+
+
+def _clean_content(text: str) -> str:
+    """Remove navigation/boilerplate lines from crawled markdown."""
+    lines = text.splitlines()
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        if len(s) < 30 and not s[-1] in ".!?:":
+            continue
+        alpha = sum(c.isalpha() for c in s)
+        if alpha / max(len(s), 1) < 0.45:
+            continue
+        if _NOISE_PATTERNS.search(s):
+            continue
+        if s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return "\n".join(out)
 
 
 class ResearcherAgent:
@@ -68,7 +99,7 @@ class ResearcherAgent:
                 domain = urlparse(url).netloc
                 # Sanitise to ASCII-safe unicode to avoid cp1252 errors on Windows
                 raw_md = result.markdown or ""
-                content = raw_md.encode("utf-8", errors="replace").decode("utf-8")
+                content = _clean_content(raw_md.encode("utf-8", errors="replace").decode("utf-8"))
                 title_raw = (result.metadata or {}).get("title", domain)
                 title = str(title_raw).encode("utf-8", errors="replace").decode("utf-8")
                 return EvidenceDocument(
