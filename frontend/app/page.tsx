@@ -25,59 +25,205 @@ const SUGGESTIONS = [
   "Are electric cars better for the environment?",
 ];
 
-// ─── Dala-style soft light orbs, lerp-following the cursor ────────────────────
-function BackgroundOrbs() {
-  const aRef = useRef<HTMLDivElement>(null);
-  const bRef = useRef<HTMLDivElement>(null);
+// ─── 3-D triangle-particle sphere — Dala-style, cursor-scatter ───────────────
+const SPHERE_COLORS: [number, number, number][] = [
+  [52,  211, 153],  // emerald
+  [255, 184, 41],   // gold
+  [146, 106, 255],  // violet
+  [255, 255, 255],  // white
+  [24,  155, 129],  // teal
+  [99,  102, 241],  // indigo
+];
+
+function BrainSphere() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mouseRef  = useRef({ x: -99999, y: -99999 });
 
   useEffect(() => {
-    let tx = window.innerWidth  * 0.5;
-    let ty = window.innerHeight * 0.4;
-    let ax = tx,       ay = ty;
-    let bx = tx * 0.3, by = ty * 1.1;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-    let raf = 0;
+    let W = window.innerWidth;
+    let H = window.innerHeight;
+    canvas.width  = W;
+    canvas.height = H;
+
+    // ── Build Fibonacci sphere ─────────────────────────────────────────────
+    const N      = 700;
+    const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+
+    type Pt = {
+      ox: number; oy: number; oz: number;   // unit sphere position (fixed)
+      dx: number; dy: number; dz: number;   // displacement (scatter)
+      vx: number; vy: number; vz: number;   // velocity of displacement
+      color: [number, number, number];
+      rot: number;
+      rotSpd: number;
+      sz: number;
+    };
+
+    const pts: Pt[] = Array.from({ length: N }, (_, i) => {
+      const y   = 1 - (i / (N - 1)) * 2;
+      const r   = Math.sqrt(Math.max(0, 1 - y * y));
+      const phi = GOLDEN * i;
+      return {
+        ox: Math.cos(phi) * r, oy: y, oz: Math.sin(phi) * r,
+        dx: 0, dy: 0, dz: 0,
+        vx: 0, vy: 0, vz: 0,
+        color: SPHERE_COLORS[i % SPHERE_COLORS.length],
+        rot:    Math.random() * Math.PI * 2,
+        rotSpd: (Math.random() - 0.5) * 0.05,
+        sz:     Math.random() * 4 + 2.5,
+      };
+    });
+
+    const FOV    = 520;
+    const SPRING = 0.042;
+    const DAMP   = 0.83;
+    const SCT_R  = 180;   // screen-space scatter radius (px)
+    const SCT_F  = 0.06;  // scatter impulse strength
+
+    let rotY = 0;
+    let raf  = 0;
 
     function tick() {
-      // Orb A: emerald, tracks cursor fairly closely
-      ax += (tx       - ax) * 0.048;
-      ay += (ty       - ay) * 0.048;
-      // Orb B: violet, lags behind at an offset
-      bx += (tx * 0.65 - bx) * 0.019;
-      by += (ty * 1.15 - by) * 0.019;
+      ctx.clearRect(0, 0, W, H);
 
-      if (aRef.current) aRef.current.style.transform = `translate(${ax - 550}px, ${ay - 550}px)`;
-      if (bRef.current) bRef.current.style.transform = `translate(${bx - 420}px, ${by - 420}px)`;
+      rotY += 0.0025;
+      const cosY = Math.cos(rotY);
+      const sinY = Math.sin(rotY);
+
+      // Sphere lives on the right ~60% horizontally
+      const cx = W * 0.64;
+      const cy = H * 0.44;
+      const R  = Math.min(W, H) * 0.30;
+
+      const mx = mouseRef.current.x;
+      const my = mouseRef.current.y;
+
+      // ── Physics + project ────────────────────────────────────────────────
+      type Proj = { sx: number; sy: number; sz: number; depth: number; pt: Pt };
+      const projected: Proj[] = pts.map(p => {
+        // Spring back displacement
+        p.vx += (-p.dx * SPRING); p.vy += (-p.dy * SPRING); p.vz += (-p.dz * SPRING);
+        p.vx *= DAMP; p.vy *= DAMP; p.vz *= DAMP;
+        p.dx += p.vx;  p.dy += p.vy;  p.dz += p.vz;
+        p.rot += p.rotSpd;
+
+        // Rotate base position around Y axis
+        const rx = p.ox * cosY - p.oz * sinY;
+        const ry = p.oy;
+        const rz = p.ox * sinY + p.oz * cosY;
+
+        // Add displacement
+        const wx = rx + p.dx;
+        const wy = ry + p.dy;
+        const wz = rz + p.dz;
+
+        // Perspective project
+        const scale = FOV / (FOV + wz * R * 0.4);
+        const sx    = cx + wx * R * scale;
+        const sy    = cy + wy * R * scale;
+
+        // Mouse scatter — push radially from sphere surface
+        const ddx = sx - mx;
+        const ddy = sy - my;
+        const dd  = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (dd < SCT_R && dd > 0) {
+          const f = ((SCT_R - dd) / SCT_R) * SCT_F;
+          p.vx += rx * f;
+          p.vy += ry * f;
+          p.vz += rz * f;
+        }
+
+        return { sx, sy, sz: scale, depth: wz, pt: p };
+      });
+
+      // Depth sort back-to-front
+      projected.sort((a, b) => a.depth - b.depth);
+
+      // ── Draw triangles ────────────────────────────────────────────────────
+      for (const { sx, sy, sz, depth, pt } of projected) {
+        const alpha = Math.max(0.08, (depth + 1.6) / 3.2) * 0.9;
+        const size  = pt.sz * sz;
+        const [r, g, b] = pt.color;
+
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(pt.rot);
+        ctx.beginPath();
+        ctx.moveTo(0, -size);
+        ctx.lineTo( size * 0.866,  size * 0.5);
+        ctx.lineTo(-size * 0.866,  size * 0.5);
+        ctx.closePath();
+        ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.lineWidth   = 0.7;
+        ctx.stroke();
+        ctx.restore();
+      }
 
       raf = requestAnimationFrame(tick);
     }
 
     tick();
 
+    const onResize = () => {
+      W = window.innerWidth; H = window.innerHeight;
+      canvas.width = W; canvas.height = H;
+    };
+    const onMouseMove  = (e: MouseEvent) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
+    const onMouseLeave = () => { mouseRef.current = { x: -99999, y: -99999 }; };
+
+    window.addEventListener("resize",     onResize);
+    window.addEventListener("mousemove",  onMouseMove);
+    window.addEventListener("mouseleave", onMouseLeave);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize",     onResize);
+      window.removeEventListener("mousemove",  onMouseMove);
+      window.removeEventListener("mouseleave", onMouseLeave);
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden="true"
+      style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none" }}
+    />
+  );
+}
+
+// ─── Soft ambient orbs that drift with the cursor ─────────────────────────────
+function AmbientOrbs() {
+  const aRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let tx = window.innerWidth * 0.5, ty = window.innerHeight * 0.4;
+    let ax = tx, ay = ty;
+    let raf = 0;
+
+    function tick() {
+      ax += (tx - ax) * 0.035; ay += (ty - ay) * 0.035;
+      if (aRef.current) aRef.current.style.transform = `translate(${ax - 600}px, ${ay - 600}px)`;
+      raf = requestAnimationFrame(tick);
+    }
+    tick();
     const mv = (e: MouseEvent) => { tx = e.clientX; ty = e.clientY; };
     window.addEventListener("mousemove", mv);
     return () => { cancelAnimationFrame(raf); window.removeEventListener("mousemove", mv); };
   }, []);
 
   return (
-    <>
-      {/* Orb A — emerald */}
-      <div ref={aRef} aria-hidden="true" style={{
-        position: "fixed", top: 0, left: 0, zIndex: 0, pointerEvents: "none",
-        width: 1100, height: 1100, borderRadius: "50%",
-        background: "radial-gradient(circle at center, rgba(16,185,129,0.22) 0%, rgba(16,185,129,0.07) 45%, transparent 70%)",
-        filter: "blur(72px)",
-        willChange: "transform",
-      }} />
-      {/* Orb B — violet */}
-      <div ref={bRef} aria-hidden="true" style={{
-        position: "fixed", top: 0, left: 0, zIndex: 0, pointerEvents: "none",
-        width: 840, height: 840, borderRadius: "50%",
-        background: "radial-gradient(circle at center, rgba(99,102,241,0.2) 0%, rgba(99,102,241,0.06) 45%, transparent 70%)",
-        filter: "blur(90px)",
-        willChange: "transform",
-      }} />
-    </>
+    <div ref={aRef} aria-hidden="true" style={{
+      position: "fixed", top: 0, left: 0, zIndex: 0, pointerEvents: "none",
+      width: 1200, height: 1200, borderRadius: "50%",
+      background: "radial-gradient(circle at center, rgba(16,185,129,0.10) 0%, rgba(99,102,241,0.06) 50%, transparent 70%)",
+      filter: "blur(80px)",
+      willChange: "transform",
+    }} />
   );
 }
 
@@ -291,7 +437,8 @@ export default function HomePage() {
   return (
     <div style={{ minHeight: "100dvh", background: "#030712", color: "#f1f5f9", display: "flex", flexDirection: "column" }}>
       {/* Background layer stack */}
-      <BackgroundOrbs />
+      <BrainSphere />
+      <AmbientOrbs />
       <GrainOverlay />
 
       {appState === "loading" && <LoadingOverlay step={step} logs={logs} />}
