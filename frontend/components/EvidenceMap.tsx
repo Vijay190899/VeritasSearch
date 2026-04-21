@@ -1,261 +1,245 @@
 "use client";
 
-import { useMemo } from "react";
-import type { ClaimVerdict, GraphNode, GraphEdge } from "@/lib/types";
+import { useEffect, useRef } from "react";
+import type { ClaimVerdict } from "@/lib/types";
 
-interface EvidenceMapProps {
-  verdicts: ClaimVerdict[];
-}
+const CLAIM_COLORS: [number, number, number][] = [
+  [16, 185, 129],   // emerald
+  [99, 102, 241],   // indigo
+  [168, 85, 247],   // violet
+  [245, 158, 11],   // amber
+  [236, 72, 153],   // pink
+  [56, 189, 248],   // sky
+];
 
-const CLAIM_COLORS = ["#10b981", "#6366f1", "#a855f7", "#f59e0b", "#ec4899"];
-const CANVAS_W = 1100;
-const CANVAS_H = 480;
-const NODE_W   = 190;  // claim rect half-width * 2
-const NODE_H   = 56;   // claim rect height
-const DOM_R    = 32;   // domain circle radius
+interface N3 { x: number; y: number; z: number; label: string; type: "claim" | "domain"; stance?: "SUPPORTS" | "REFUTES"; ci: number }
+interface E3 { a: N3; b: N3; stance: "SUPPORTS" | "REFUTES" }
 
-function buildGraph(verdicts: ClaimVerdict[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const nodes: GraphNode[] = [];
-  const edges: GraphEdge[] = [];
-  const domainSeen = new Set<string>();
+export default function EvidenceMap({ verdicts }: { verdicts: ClaimVerdict[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  for (const v of verdicts) {
-    nodes.push({ id: v.claim_id, label: v.claim_text.slice(0, 48) + (v.claim_text.length > 48 ? "…" : ""), type: "claim" });
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-    for (const domain of v.supports) {
-      if (!domainSeen.has(domain)) {
-        nodes.push({ id: domain, label: domain, type: "domain", stance: "SUPPORTS" });
-        domainSeen.add(domain);
-      }
-      edges.push({ source: domain, target: v.claim_id, stance: "SUPPORTS" });
-    }
-    for (const domain of v.refutes) {
-      if (!domainSeen.has(domain)) {
-        nodes.push({ id: domain, label: domain, type: "domain", stance: "REFUTES" });
-        domainSeen.add(domain);
-      }
-      edges.push({ source: domain, target: v.claim_id, stance: "REFUTES" });
-    }
-  }
-  return { nodes, edges };
-}
+    let W = canvas.parentElement?.offsetWidth ?? 900;
+    const H = 540;
+    canvas.width = W;
+    canvas.height = H;
 
-function layoutNodes(nodes: GraphNode[], verdicts: ClaimVerdict[]): Map<string, { x: number; y: number }> {
-  const positions = new Map<string, { x: number; y: number }>();
-  const claimCount = verdicts.length;
+    const nodes: N3[] = [];
+    const edges: E3[] = [];
 
-  verdicts.forEach((v, i) => {
-    const x = ((i + 1) / (claimCount + 1)) * CANVAS_W;
-    positions.set(v.claim_id, { x, y: CANVAS_H / 2 });
-  });
+    const n = verdicts.length;
+    const claimR = Math.min(W * 0.22, 180);
 
-  const domainsByClaimId: Record<string, string[]> = {};
-  for (const v of verdicts) {
-    domainsByClaimId[v.claim_id] = [...v.supports, ...v.refutes];
-  }
+    const claimNodes: N3[] = verdicts.map((v, i) => {
+      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+      return { x: Math.cos(a) * claimR, y: 0, z: Math.sin(a) * claimR, label: v.claim_text, type: "claim", ci: i };
+    });
+    nodes.push(...claimNodes);
 
-  for (const v of verdicts) {
-    const claimPos = positions.get(v.claim_id)!;
-    const domains = domainsByClaimId[v.claim_id];
-    domains.forEach((domain, i) => {
-      if (positions.has(domain)) return;
-      const angle = (Math.PI / (domains.length + 1)) * (i + 1);
-      const radius = 135;
-      const side = i % 2 === 0 ? 1 : -1;
-      positions.set(domain, {
-        x: claimPos.x + Math.cos(angle) * radius * side,
-        y: claimPos.y + Math.sin(angle) * radius * (i < domains.length / 2 ? -1 : 1),
+    verdicts.forEach((v, ci) => {
+      const cn = claimNodes[ci];
+      const all = [
+        ...v.supports.map(d => ({ d, s: "SUPPORTS" as const })),
+        ...v.refutes.map(d => ({ d, s: "REFUTES" as const })),
+      ];
+      all.forEach(({ d, s }, di) => {
+        const da = (di / Math.max(all.length, 1)) * Math.PI * 2;
+        const dr = 130;
+        const yOff = (di % 2 === 0 ? 1 : -1) * 55;
+        const dn: N3 = {
+          x: cn.x + Math.cos(da) * dr,
+          y: yOff,
+          z: cn.z + Math.sin(da) * dr,
+          label: d,
+          type: "domain",
+          stance: s,
+          ci,
+        };
+        nodes.push(dn);
+        edges.push({ a: dn, b: cn, stance: s });
       });
     });
-  }
 
-  return positions;
-}
+    const FOV = 700;
+    let rotY = 0;
+    let raf = 0;
 
-export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
-  const { nodes, edges } = useMemo(() => buildGraph(verdicts), [verdicts]);
-  const positions = useMemo(() => layoutNodes(nodes, verdicts), [nodes, verdicts]);
+    function proj(n: N3) {
+      const rx = n.x * Math.cos(rotY) - n.z * Math.sin(rotY);
+      const rz = n.x * Math.sin(rotY) + n.z * Math.cos(rotY);
+      const sc = FOV / (FOV + rz + 500);
+      return { sx: W / 2 + rx * sc, sy: H / 2 - n.y * sc * 0.9, sc, depth: rz };
+    }
 
-  if (verdicts.length === 0) {
-    return (
-      <p className="text-sm text-gray-600 text-center py-10">
-        No evidence to display.
-      </p>
-    );
-  }
+    function roundRect(x: number, y: number, w: number, h: number, r: number) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function wrapText(text: string, maxW: number, fontSize: number): string[] {
+      const words = text.split(" ");
+      const lines: string[] = [];
+      let cur = "";
+      ctx.font = `${fontSize}px system-ui, sans-serif`;
+      for (const w of words) {
+        const test = cur ? cur + " " + w : w;
+        if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; }
+        else cur = test;
+      }
+      if (cur) lines.push(cur);
+      return lines.slice(0, 3);
+    }
+
+    function tick() {
+      ctx.clearRect(0, 0, W, H);
+      rotY += 0.003;
+
+      // Project everything
+      const pNodes = nodes.map(n => ({ n, ...proj(n) }));
+      const pEdges = edges.map(e => {
+        const pa = proj(e.a), pb = proj(e.b);
+        return { e, pa, pb, depth: (pa.depth + pb.depth) / 2 };
+      });
+
+      // Depth-sort: back to front
+      const all: ({ k: "e"; pe: typeof pEdges[0] } | { k: "n"; pn: typeof pNodes[0] })[] =
+        [...pEdges.map(pe => ({ k: "e" as const, pe })),
+         ...pNodes.map(pn => ({ k: "n" as const, pn }))];
+      all.sort((a, b) => (a.k === "e" ? a.pe.depth : a.pn.depth) - (b.k === "e" ? b.pe.depth : b.pn.depth));
+
+      for (const obj of all) {
+        if (obj.k === "e") {
+          const { pa, pb, e } = obj.pe;
+          const col = e.stance === "SUPPORTS" ? "52,211,153" : "239,68,68";
+          const alpha = Math.max(0.08, Math.min(0.45, (1 - obj.pe.depth / 800)));
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(pa.sx, pa.sy);
+          ctx.lineTo(pb.sx, pb.sy);
+          ctx.strokeStyle = `rgba(${col},${alpha})`;
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+          // Arrowhead
+          const dx = pb.sx - pa.sx, dy = pb.sy - pa.sy;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          const ux = dx / len, uy2 = dy / len;
+          const ax = pb.sx - ux * 14, ay = pb.sy - uy2 * 14;
+          ctx.beginPath();
+          ctx.moveTo(ax - uy2 * 5, ay + ux * 5);
+          ctx.lineTo(pb.sx, pb.sy);
+          ctx.lineTo(ax + uy2 * 5, ay - ux * 5);
+          ctx.strokeStyle = `rgba(${col},${alpha * 1.8})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.restore();
+        } else {
+          const { n, sx, sy, sc, depth } = obj.pn;
+          const alpha = Math.max(0.55, Math.min(1.0, 0.7 + (0.4 - depth / 600)));
+
+          if (n.type === "claim") {
+            const [r, g, b] = CLAIM_COLORS[n.ci % CLAIM_COLORS.length];
+            const boxW = Math.max(140, Math.min(200, 185 * sc));
+            const fs = Math.max(9, Math.min(13, 12 * sc));
+            const lines = wrapText(n.label, boxW - 20, fs);
+            const lineH = fs * 1.4;
+            const boxH = Math.max(40, lines.length * lineH + 20);
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            // Glow
+            ctx.shadowColor = `rgb(${r},${g},${b})`;
+            ctx.shadowBlur = 14 * sc;
+            roundRect(sx - boxW / 2, sy - boxH / 2, boxW, boxH, 10 * sc);
+            ctx.fillStyle = `rgba(${r},${g},${b},0.12)`;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = `rgba(${r},${g},${b},0.85)`;
+            ctx.lineWidth = 1.5 * sc;
+            ctx.stroke();
+            ctx.fillStyle = "#f1f5f9";
+            ctx.font = `600 ${fs}px system-ui, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            const totalH = lines.length * lineH;
+            lines.forEach((line, li) => {
+              ctx.fillText(line, sx, sy - totalH / 2 + lineH * li + lineH / 2);
+            });
+            ctx.restore();
+          } else {
+            const col: [number, number, number] = n.stance === "SUPPORTS" ? [52, 211, 153] : [239, 68, 68];
+            const [r, g, b] = col;
+            const radius = Math.max(22, Math.min(36, 32 * sc));
+            const fs = Math.max(7, Math.min(10, 9 * sc));
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.shadowColor = `rgb(${r},${g},${b})`;
+            ctx.shadowBlur = 10 * sc;
+            ctx.beginPath();
+            ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${r},${g},${b},0.15)`;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = `rgba(${r},${g},${b},0.9)`;
+            ctx.lineWidth = 1.5 * sc;
+            ctx.stroke();
+            ctx.fillStyle = "#e2e8f0";
+            ctx.font = `${fs}px monospace`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            const lbl = n.label.length > 16 ? n.label.slice(0, 15) + "…" : n.label;
+            ctx.fillText(lbl, sx, sy);
+            ctx.restore();
+          }
+        }
+      }
+
+      // Legend
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.fillStyle = "#52d399";
+      ctx.fillRect(16, H - 28, 10, 10);
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillText("Supports", 30, H - 19);
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.arc(70, H - 23, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillText("Refutes", 80, H - 19);
+      ctx.restore();
+
+      raf = requestAnimationFrame(tick);
+    }
+
+    tick();
+
+    const ro = new ResizeObserver(() => {
+      W = canvas.parentElement?.offsetWidth ?? W;
+      canvas.width = W;
+    });
+    if (canvas.parentElement) ro.observe(canvas.parentElement);
+
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, [verdicts]);
+
+  if (!verdicts.length)
+    return <p style={{ color: "#64748b", textAlign: "center", padding: "40px 0", fontSize: 13 }}>No evidence to display.</p>;
 
   return (
-    <div
-      className="w-full overflow-x-auto"
-      role="img"
-      aria-label="Evidence graph: source domains linked to verified claims"
-    >
-      <svg
-        viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
-        width="100%"
-        height={CANVAS_H}
-        style={{ background: "rgba(255,255,255,0.015)", borderRadius: 16 }}
-        aria-hidden="true"
-      >
-        <defs>
-          {/* Arrow markers */}
-          <marker id="arrow-support" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
-            <path d="M0,0 L0,7 L7,3.5 z" fill="#10b981" opacity="0.8" />
-          </marker>
-          <marker id="arrow-refute" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
-            <path d="M0,0 L0,7 L7,3.5 z" fill="#ef4444" opacity="0.8" />
-          </marker>
-
-          {/* Glow filters */}
-          <filter id="glow-green" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="4" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          <filter id="glow-red" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="4" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          <filter id="glow-claim" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="6" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
-
-        {/* Edges */}
-        {edges.map((e, i) => {
-          const src = positions.get(e.source);
-          const tgt = positions.get(e.target);
-          if (!src || !tgt) return null;
-          const isSupport = e.stance === "SUPPORTS";
-          const color = isSupport ? "#10b981" : "#ef4444";
-          const dx = tgt.x - src.x;
-          const dy = tgt.y - src.y;
-          const len = Math.sqrt(dx * dx + dy * dy);
-          const ux = dx / len;
-          const uy = dy / len;
-          const endX = tgt.x - ux * DOM_R;
-          const endY = tgt.y - uy * DOM_R;
-
-          return (
-            <line
-              key={i}
-              x1={src.x}
-              y1={src.y}
-              x2={endX}
-              y2={endY}
-              stroke={color}
-              strokeWidth="1.5"
-              strokeOpacity="0.35"
-              markerEnd={isSupport ? "url(#arrow-support)" : "url(#arrow-refute)"}
-            />
-          );
-        })}
-
-        {/* Nodes */}
-        {nodes.map((node) => {
-          const pos = positions.get(node.id);
-          if (!pos) return null;
-          const isClaim = node.type === "claim";
-          const claimIndex = verdicts.findIndex((v) => v.claim_id === node.id);
-          const claimColor = isClaim ? CLAIM_COLORS[claimIndex % CLAIM_COLORS.length] : undefined;
-          const domainColor = node.stance === "SUPPORTS" ? "#10b981" : "#ef4444";
-          const fill = isClaim ? (claimColor! + "20") : (domainColor + "18");
-          const stroke = isClaim ? claimColor! : domainColor;
-
-          // Word-wrap claim label into two lines of ≤26 chars each
-          const words   = node.label.split(" ");
-          const lines: string[] = [];
-          let cur = "";
-          for (const w of words) {
-            if ((cur + (cur ? " " : "") + w).length > 26) {
-              if (cur) lines.push(cur);
-              cur = w;
-            } else {
-              cur = cur ? cur + " " + w : w;
-            }
-          }
-          if (cur) lines.push(cur);
-          const lineCount = Math.min(lines.length, 3);
-          const lineH = 12;
-          const rectH = Math.max(NODE_H, lineCount * lineH + 24);
-
-          return (
-            <g key={node.id} transform={`translate(${pos.x},${pos.y})`}>
-              {isClaim ? (
-                <>
-                  <rect
-                    x={-NODE_W / 2}
-                    y={-rectH / 2}
-                    width={NODE_W}
-                    height={rectH}
-                    rx={12}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth="1.5"
-                    filter="url(#glow-claim)"
-                  />
-                  <text
-                    textAnchor="middle"
-                    fill="#f1f5f9"
-                    fontSize={10}
-                    fontFamily="var(--font-sans), system-ui, sans-serif"
-                    fontWeight="500"
-                  >
-                    {lines.slice(0, 3).map((line, li) => (
-                      <tspan
-                        key={li}
-                        x="0"
-                        dy={li === 0 ? -(lineCount - 1) * lineH / 2 : lineH}
-                      >
-                        {line}
-                      </tspan>
-                    ))}
-                  </text>
-                </>
-              ) : (
-                <>
-                  <circle
-                    r={DOM_R}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth="1.5"
-                    filter={node.stance === "SUPPORTS" ? "url(#glow-green)" : "url(#glow-red)"}
-                  />
-                  <text
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fill="#e2e8f0"
-                    fontSize={8.5}
-                    fontFamily="var(--font-mono), monospace"
-                  >
-                    {node.label}
-                  </text>
-                </>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-
-      <div style={{ display: "flex", gap: 20, marginTop: 12, paddingLeft: 4 }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#64748b" }}>
-          <span style={{ width: 10, height: 10, borderRadius: 3, background: "rgba(16,185,129,0.25)", border: "1px solid rgba(16,185,129,0.6)", display: "inline-block" }} />
-          Supports claim
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#64748b" }}>
-          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "rgba(239,68,68,0.25)", border: "1px solid rgba(239,68,68,0.6)", display: "inline-block" }} />
-          Refutes claim
-        </span>
-      </div>
-    </div>
+    <canvas
+      ref={canvasRef}
+      aria-label="3D evidence graph — source domains linked to claims"
+      style={{ width: "100%", height: 540, display: "block", borderRadius: 10 }}
+    />
   );
 }
