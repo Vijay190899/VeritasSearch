@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   Search, Shield, AlertTriangle, CheckCircle, XCircle,
   Loader2, Sparkles, Globe, Zap, ArrowRight,
@@ -12,10 +12,10 @@ import type { VerificationReport, AuditResult } from "@/lib/types";
 type AppState = "idle" | "loading" | "done" | "error";
 
 const STEPS = [
-  { label: "Decomposing into claims", icon: Sparkles },
-  { label: "Scraping sources", icon: Globe },
-  { label: "Auditing evidence", icon: Zap },
-  { label: "Generating report", icon: Shield },
+  { label: "Decomposing into claims", icon: Sparkles, pct: 20 },
+  { label: "Scraping sources",        icon: Globe,    pct: 50 },
+  { label: "Auditing evidence",       icon: Zap,      pct: 80 },
+  { label: "Generating report",       icon: Shield,   pct: 95 },
 ];
 
 const SUGGESTIONS = [
@@ -25,13 +25,241 @@ const SUGGESTIONS = [
   "Are electric cars better for the environment?",
 ];
 
+// ─── Particle canvas ──────────────────────────────────────────────────────────
+function ParticleField() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mouseRef  = useRef({ x: -9999, y: -9999 });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let W = window.innerWidth;
+    let H = window.innerHeight;
+    canvas.width  = W;
+    canvas.height = H;
+
+    type P = { ox: number; oy: number; x: number; y: number; vx: number; vy: number; r: number; a: number };
+
+    const N   = 90;
+    const pts: P[] = Array.from({ length: N }, () => {
+      const ox = Math.random() * W;
+      const oy = Math.random() * H;
+      return { ox, oy, x: ox, y: oy, vx: 0, vy: 0, r: Math.random() * 1.6 + 0.4, a: Math.random() * 0.4 + 0.15 };
+    });
+
+    const REPEL_R = 150;
+    const SPRING  = 0.032;
+    const DAMP    = 0.87;
+    const REPEL   = 4.2;
+    const CONN_D  = 90;
+
+    let raf = 0;
+
+    function tick() {
+      ctx.clearRect(0, 0, W, H);
+      const mx = mouseRef.current.x;
+      const my = mouseRef.current.y;
+
+      for (let i = 0; i < N; i++) {
+        const p = pts[i];
+        p.vx += (p.ox - p.x) * SPRING;
+        p.vy += (p.oy - p.y) * SPRING;
+        const dx = p.x - mx;
+        const dy = p.y - my;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < REPEL_R * REPEL_R && d2 > 0) {
+          const d = Math.sqrt(d2);
+          const f = ((REPEL_R - d) / REPEL_R) * REPEL;
+          p.vx += (dx / d) * f;
+          p.vy += (dy / d) * f;
+        }
+        p.vx *= DAMP;
+        p.vy *= DAMP;
+        p.x  += p.vx;
+        p.y  += p.vy;
+      }
+
+      for (let i = 0; i < N; i++) {
+        for (let j = i + 1; j < N; j++) {
+          const dx = pts[i].x - pts[j].x;
+          const dy = pts[i].y - pts[j].y;
+          const d  = Math.sqrt(dx * dx + dy * dy);
+          if (d < CONN_D) {
+            ctx.beginPath();
+            ctx.moveTo(pts[i].x, pts[i].y);
+            ctx.lineTo(pts[j].x, pts[j].y);
+            ctx.strokeStyle = `rgba(52,211,153,${(1 - d / CONN_D) * 0.09})`;
+            ctx.lineWidth   = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+
+      for (const p of pts) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(52,211,153,${p.a})`;
+        ctx.fill();
+      }
+
+      raf = requestAnimationFrame(tick);
+    }
+
+    tick();
+
+    const onResize = () => {
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width  = W;
+      canvas.height = H;
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      mouseRef.current = { x: e.clientX, y: e.clientY };
+    };
+    const onMouseLeave = () => {
+      mouseRef.current = { x: -9999, y: -9999 };
+    };
+
+    window.addEventListener("resize",     onResize);
+    window.addEventListener("mousemove",  onMouseMove);
+    window.addEventListener("mouseleave", onMouseLeave);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize",     onResize);
+      window.removeEventListener("mousemove",  onMouseMove);
+      window.removeEventListener("mouseleave", onMouseLeave);
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden="true"
+      style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none" }}
+    />
+  );
+}
+
+// ─── Loading overlay ──────────────────────────────────────────────────────────
+function LoadingOverlay({ step, logs }: { step: number; logs: string[] }) {
+  const pct = step >= 0 && step < STEPS.length ? STEPS[step].pct : step >= STEPS.length ? 100 : 5;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Verification in progress"
+      style={{
+        position: "fixed", inset: 0, zIndex: 50,
+        background: "rgba(3,7,18,0.97)",
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        animation: "fadeIn 0.2s ease both",
+      }}
+    >
+      {/* Top progress bar */}
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "rgba(255,255,255,0.04)" }}>
+        <div
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: "linear-gradient(90deg, #059669, #34d399, #6ee7b7)",
+            backgroundSize: "200% auto",
+            animation: "shimmer 2s linear infinite",
+            transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
+            boxShadow: "0 0 14px rgba(52,211,153,0.7), 0 0 4px rgba(52,211,153,0.9)",
+          }}
+        />
+      </div>
+
+      {/* Card */}
+      <div style={{
+        width: "100%", maxWidth: 400,
+        margin: "0 16px",
+        background: "rgba(13,15,26,0.98)",
+        border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 22,
+        padding: 32,
+        boxShadow: "0 40px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(52,211,153,0.06)",
+      }}>
+        {/* Shield pulse */}
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div className="animate-pulse" style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 52, height: 52, borderRadius: 16,
+            background: "rgba(16,185,129,0.12)",
+            border: "1px solid rgba(52,211,153,0.25)",
+            marginBottom: 12,
+          }}>
+            <Shield style={{ width: 24, height: 24, color: "#34d399" }} />
+          </div>
+          <p style={{ fontSize: 11, fontWeight: 700, color: "#475569", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            Verifying
+          </p>
+        </div>
+
+        {/* Steps */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {STEPS.map((s, i) => {
+            const Icon  = s.icon;
+            const done  = i < step;
+            const active = i === step;
+            return (
+              <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: 9, flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: done || active ? "rgba(16,185,129,0.14)" : "rgba(255,255,255,0.04)",
+                  border: `1px solid ${done || active ? "rgba(52,211,153,0.28)" : "rgba(255,255,255,0.06)"}`,
+                  transition: "all 0.35s ease",
+                }}>
+                  {done   ? <CheckCircle style={{ width: 14, height: 14, color: "#34d399" }} />
+                  : active ? <Loader2    className="animate-spin" style={{ width: 14, height: 14, color: "#34d399" }} />
+                  :           <Icon      style={{ width: 14, height: 14, color: "#334155" }} />}
+                </div>
+                <span style={{
+                  fontSize: 13,
+                  color: done ? "#334155" : active ? "#e2e8f0" : "#1e293b",
+                  textDecoration: done ? "line-through" : "none",
+                  transition: "color 0.3s ease",
+                }}>
+                  {s.label}
+                </span>
+                {active && (
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: "#10b981", fontFamily: "monospace" }}>
+                    running…
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {logs.length > 0 && (
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+            {logs.slice(-3).map((l, i) => (
+              <p key={i} style={{ fontSize: 11, color: "#334155", fontFamily: "monospace", lineHeight: 1.9 }}>
+                <span style={{ color: "#059669", marginRight: 8 }}>›</span>{l}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
 export default function HomePage() {
-  const [query, setQuery] = useState("");
-  const [appState, setAppState] = useState<AppState>("idle");
-  const [report, setReport] = useState<VerificationReport | null>(null);
-  const [audit, setAudit] = useState<AuditResult | null>(null);
-  const [step, setStep] = useState(-1);
-  const [logs, setLogs] = useState<string[]>([]);
+  const [query,       setQuery]       = useState("");
+  const [appState,    setAppState]    = useState<AppState>("idle");
+  const [report,      setReport]      = useState<VerificationReport | null>(null);
+  const [audit,       setAudit]       = useState<AuditResult | null>(null);
+  const [step,        setStep]        = useState(-1);
+  const [logs,        setLogs]        = useState<string[]>([]);
   const [streamError, setStreamError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -52,21 +280,17 @@ export default function HomePage() {
         body: JSON.stringify({ query: q, max_sources: 10 }),
       });
 
-      if (!res.ok || !res.body) {
-        throw new Error(`Backend returned ${res.status}`);
-      }
+      if (!res.ok || !res.body) throw new Error(`Backend returned ${res.status}`);
 
-      const reader = res.body.getReader();
+      const reader  = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
+      let buffer    = "";
       let gotReport = false;
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-
-        // Split on SSE message boundaries
         const parts = buffer.split("\n\n");
         buffer = parts.pop() ?? "";
 
@@ -74,11 +298,7 @@ export default function HomePage() {
           const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
           if (!dataLine) continue;
           let payload: Record<string, unknown>;
-          try {
-            payload = JSON.parse(dataLine.slice(6));
-          } catch {
-            continue;
-          }
+          try { payload = JSON.parse(dataLine.slice(6)); } catch { continue; }
 
           const evt = payload.event as string;
 
@@ -117,163 +337,154 @@ export default function HomePage() {
     }
   }, [query]);
 
-  return (
-    <div className="min-h-dvh bg-[#08090f] text-slate-100 flex flex-col">
-      {/* Ambient top glow */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed inset-x-0 top-0 h-64 opacity-30"
-        style={{
-          background:
-            "radial-gradient(ellipse 80% 100% at 50% 0%, rgba(16,185,129,0.25) 0%, transparent 100%)",
-        }}
-      />
+  const isActive = query.trim().length > 0 && appState !== "loading";
 
-      <main className="flex-1 flex flex-col items-center px-4 py-16 relative z-10">
-        {/* ── Header ── */}
-        <header className="mb-12 text-center max-w-xl">
-          <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-3.5 py-1 mb-7 text-xs font-medium text-emerald-400 tracking-wide uppercase">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+  return (
+    <div style={{ minHeight: "100dvh", background: "#030712", color: "#f1f5f9", display: "flex", flexDirection: "column" }}>
+      <ParticleField />
+
+      {appState === "loading" && <LoadingOverlay step={step} logs={logs} />}
+
+      {/* Ambient radial glow */}
+      <div aria-hidden="true" style={{
+        position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none",
+        background: "radial-gradient(ellipse 80% 60% at 50% -5%, rgba(16,185,129,0.1) 0%, transparent 70%)",
+      }} />
+
+      <main style={{
+        flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+        padding: "0 16px 60px",
+        paddingTop: appState === "done" ? 48 : "12vh",
+        position: "relative", zIndex: 1,
+        transition: "padding-top 0.5s ease",
+      }}>
+
+        {/* ── Hero ── */}
+        <header style={{
+          textAlign: "center",
+          marginBottom: appState === "done" ? 32 : 52,
+          maxWidth: 640,
+          transition: "margin-bottom 0.4s ease",
+        }}>
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: 7,
+            background: "rgba(16,185,129,0.07)", border: "1px solid rgba(52,211,153,0.18)",
+            borderRadius: 999, padding: "5px 16px", marginBottom: 26,
+            fontSize: 11, fontWeight: 600, color: "#34d399", letterSpacing: "0.09em", textTransform: "uppercase",
+          }}>
+            <span className="animate-pulse" style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "#34d399", boxShadow: "0 0 6px #34d399",
+              flexShrink: 0,
+            }} />
             Phi-3.5 · SearXNG · Fully Local
           </div>
 
-          <div className="flex items-center justify-center gap-3 mb-4">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginBottom: 18 }}>
             <Shield
-              className="w-9 h-9 text-emerald-400 shrink-0"
-              style={{ filter: "drop-shadow(0 0 10px rgba(16,185,129,0.65))" }}
               aria-hidden="true"
-            />
-            <h1
-              className="text-5xl font-bold tracking-tight"
               style={{
-                background: "linear-gradient(135deg, #34d399 0%, #6ee7b7 50%, #10b981 100%)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
+                width: 40, height: 40, color: "#34d399", flexShrink: 0,
+                filter: "drop-shadow(0 0 20px rgba(52,211,153,0.65))",
               }}
-            >
+            />
+            <h1 style={{
+              fontSize: "clamp(2.4rem, 6vw, 3.8rem)",
+              fontWeight: 800, letterSpacing: "-0.035em", lineHeight: 1, margin: 0,
+              background: "linear-gradient(135deg, #34d399 0%, #a7f3d0 45%, #6ee7b7 75%, #059669 100%)",
+              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
+            }}>
               VeritasSearch
             </h1>
           </div>
 
-          <p className="text-slate-400 text-[15px] leading-relaxed">
+          <p style={{ color: "#475569", fontSize: 15, lineHeight: 1.75, maxWidth: 480, margin: "0 auto" }}>
             Every answer arrives with a provenance score and a full evidence chain —
             not just the model&rsquo;s best guess.
           </p>
         </header>
 
         {/* ── Search bar ── */}
-        <div className="w-full max-w-2xl">
-          <div className="flex items-center gap-2 bg-[#111218] border border-[#2a2b38] rounded-2xl px-4 py-2 transition-colors duration-150 focus-within:border-emerald-500/60 focus-within:bg-[#13141c]">
-            <Search className="w-4 h-4 text-slate-500 shrink-0" aria-hidden="true" />
+        <div style={{ width: "100%", maxWidth: 700 }}>
+          <div
+            className="search-pill"
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              background: "rgba(255,255,255,0.025)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderRadius: 999,
+              padding: "6px 6px 6px 22px",
+              boxShadow: "0 8px 40px rgba(0,0,0,0.35)",
+              transition: "border-color 0.2s, box-shadow 0.2s",
+            }}
+          >
+            <Search aria-hidden="true" style={{ width: 17, height: 17, color: "#334155", flexShrink: 0 }} />
             <input
               ref={inputRef}
-              id="query-input"
               type="text"
               aria-label="Enter a claim to verify"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleVerify()}
-              placeholder="e.g. Does drinking coffee reduce Alzheimer's risk?"
-              className="flex-1 bg-transparent text-slate-100 placeholder-slate-600 outline-none text-[15px] py-2.5"
+              placeholder="Ask anything — e.g. Does coffee reduce Alzheimer's risk?"
               disabled={appState === "loading"}
               autoComplete="off"
-              spellCheck="false"
+              spellCheck={false}
+              style={{
+                flex: 1, background: "transparent", border: "none", outline: "none",
+                color: "#f1f5f9", fontSize: 15, padding: "11px 4px",
+                caretColor: "#34d399",
+              }}
             />
             <button
               onClick={handleVerify}
-              disabled={appState === "loading" || !query.trim()}
-              className="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 disabled:bg-[#1e2029] disabled:text-slate-600 disabled:cursor-not-allowed text-[#08090f] text-sm font-semibold px-4 py-2 rounded-xl transition-colors duration-150 min-w-[90px] justify-center shrink-0 cursor-pointer"
+              disabled={!isActive}
+              className="verify-btn"
+              style={{
+                display: "flex", alignItems: "center", gap: 7,
+                background: isActive ? "#10b981" : "rgba(255,255,255,0.04)",
+                color: isActive ? "#030712" : "#334155",
+                border: "none", borderRadius: 999,
+                padding: "11px 24px", fontSize: 14, fontWeight: 700,
+                cursor: isActive ? "pointer" : "not-allowed",
+                transition: "all 0.2s ease",
+                minWidth: 108, justifyContent: "center", flexShrink: 0,
+              }}
             >
-              {appState === "loading" ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Search className="w-4 h-4" />
-              )}
+              {appState === "loading"
+                ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} />
+                : <ArrowRight style={{ width: 15, height: 15 }} />
+              }
               {appState === "loading" ? "Running…" : "Verify"}
             </button>
           </div>
-          <p className="text-xs text-slate-600 text-center mt-2">
-            Press <span className="text-slate-500 font-mono">↵ Enter</span> to verify
+
+          <p style={{ textAlign: "center", fontSize: 11, color: "#1e293b", marginTop: 10 }}>
+            Press{" "}
+            <span style={{ color: "#334155", fontFamily: "monospace" }}>↵ Enter</span>
+            {" "}to verify &nbsp;·&nbsp; Results include full evidence chain
           </p>
         </div>
-
-        {/* ── Pipeline progress ── */}
-        {appState === "loading" && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="mt-8 w-full max-w-2xl bg-[#111218] border border-[#2a2b38] rounded-2xl p-5"
-          >
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest mb-4">
-              Verification Pipeline
-            </p>
-            <div className="space-y-2.5">
-              {STEPS.map((s, i) => {
-                const Icon = s.icon;
-                const done = i < step;
-                const active = i === step;
-                return (
-                  <div key={s.label} className="flex items-center gap-3">
-                    <div
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                        done
-                          ? "bg-emerald-500/15 text-emerald-400"
-                          : active
-                          ? "bg-emerald-500/15 text-emerald-400"
-                          : "bg-[#1a1b25] text-slate-600"
-                      }`}
-                    >
-                      {done ? (
-                        <CheckCircle className="w-3.5 h-3.5" />
-                      ) : active ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Icon className="w-3.5 h-3.5" />
-                      )}
-                    </div>
-                    <span
-                      className={`text-sm transition-colors ${
-                        done ? "text-slate-500 line-through decoration-slate-700" : active ? "text-slate-200" : "text-slate-600"
-                      }`}
-                    >
-                      {s.label}
-                    </span>
-                    {active && (
-                      <span className="ml-auto text-[11px] text-emerald-500 font-mono animate-pulse">
-                        running…
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {logs.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-[#1e1f2a] space-y-1">
-                {logs.map((l, i) => (
-                  <p key={i} className="text-[11px] text-slate-500 font-mono flex gap-2">
-                    <span className="text-emerald-600">›</span>
-                    {l}
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
         {/* ── Error ── */}
         {appState === "error" && (
           <div
             role="alert"
-            className="mt-8 w-full max-w-2xl bg-red-500/5 border border-red-500/20 rounded-2xl p-5 flex gap-3"
+            className="animate-fade-slide-up"
+            style={{
+              marginTop: 28, width: "100%", maxWidth: 700,
+              background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.18)",
+              borderRadius: 18, padding: "18px 22px",
+              display: "flex", gap: 14,
+            }}
           >
-            <XCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            <XCircle style={{ width: 18, height: 18, color: "#f87171", flexShrink: 0, marginTop: 1 }} />
             <div>
-              <p className="text-sm font-semibold text-red-300">Verification failed</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: "#fca5a5", marginBottom: 5 }}>Verification failed</p>
               {streamError && (
-                <p className="text-xs text-slate-500 mt-1 font-mono">{streamError}</p>
+                <p style={{ fontSize: 12, color: "#64748b", fontFamily: "monospace" }}>{streamError}</p>
               )}
-              <p className="text-xs text-slate-500 mt-1">
+              <p style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
                 Make sure the backend (port 8000) and SearXNG (port 8888) are running.
               </p>
             </div>
@@ -284,34 +495,45 @@ export default function HomePage() {
         {appState === "done" && report && (
           <section
             aria-label="Verification results"
-            className="mt-10 w-full max-w-4xl space-y-4"
+            className="animate-fade-slide-up"
+            style={{ marginTop: 40, width: "100%", maxWidth: 960, display: "flex", flexDirection: "column", gap: 16 }}
           >
-            {/* Trust score + answer */}
+            {/* Trust + Answer */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-1 bg-[#111218] border border-[#2a2b38] rounded-2xl p-6 flex flex-col items-center justify-center gap-4">
+              <div style={{
+                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 20, padding: "28px 24px",
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14,
+              }}>
                 <TrustMeter score={report.trust_score ?? 0} />
                 {report.has_conflicts && (
-                  <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/25 rounded-full px-3 py-1 text-amber-400 text-xs font-medium">
-                    <AlertTriangle className="w-3 h-3" />
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.22)",
+                    borderRadius: 999, padding: "4px 12px",
+                    fontSize: 11, fontWeight: 600, color: "#fbbf24",
+                  }}>
+                    <AlertTriangle style={{ width: 11, height: 11 }} />
                     Sources conflict
                   </div>
                 )}
-                <p className="text-[11px] text-slate-600 text-center">
+                <p style={{ fontSize: 11, color: "#1e293b", textAlign: "center" }}>
                   {report.source_count ?? 0} sources
-                  {(audit?.verdicts?.length ?? 0) > 0
-                    ? ` · ${audit!.verdicts.length} claims`
-                    : ""}
+                  {(audit?.verdicts?.length ?? 0) > 0 ? ` · ${audit!.verdicts.length} claims` : ""}
                 </p>
               </div>
 
-              <div className="md:col-span-2 bg-[#111218] border border-[#2a2b38] rounded-2xl p-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-widest">
+              <div className="md:col-span-2" style={{
+                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 20, padding: "28px 28px",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                  <Sparkles style={{ width: 13, height: 13, color: "#34d399" }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#34d399", letterSpacing: "0.12em", textTransform: "uppercase" }}>
                     Synthesised Answer
                   </span>
                 </div>
-                <p className="text-slate-200 leading-relaxed text-sm whitespace-pre-wrap">
+                <p style={{ color: "#cbd5e1", lineHeight: 1.8, fontSize: 14, whiteSpace: "pre-wrap" }}>
                   {report.answer}
                 </p>
               </div>
@@ -319,62 +541,58 @@ export default function HomePage() {
 
             {/* Claim audit */}
             {(audit?.verdicts?.length ?? 0) > 0 && (
-              <div className="bg-[#111218] border border-[#2a2b38] rounded-2xl p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-widest">
+              <div style={{
+                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 20, padding: "28px 28px",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+                  <Shield style={{ width: 13, height: 13, color: "#34d399" }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#34d399", letterSpacing: "0.12em", textTransform: "uppercase" }}>
                     Claim Audit
                   </span>
                 </div>
-                <div className="space-y-3">
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {audit!.verdicts.map((v) => {
                     const controversial = v.is_controversial;
-                    const supported = !controversial && (v.consensus_score ?? 0) >= 0.6;
+                    const supported     = !controversial && (v.consensus_score ?? 0) >= 0.6;
                     return (
                       <div
                         key={v.claim_id}
-                        className={`rounded-xl p-4 border ${
-                          controversial
-                            ? "border-amber-500/20 bg-amber-500/[0.04]"
+                        style={{
+                          borderRadius: 14, padding: "14px 16px",
+                          background: controversial
+                            ? "rgba(245,158,11,0.04)"
                             : supported
-                            ? "border-emerald-500/20 bg-emerald-500/[0.04]"
-                            : "border-[#1e2029] bg-[#0e0f16]"
-                        }`}
+                            ? "rgba(16,185,129,0.04)"
+                            : "rgba(255,255,255,0.02)",
+                          border: `1px solid ${controversial
+                            ? "rgba(245,158,11,0.18)"
+                            : supported
+                            ? "rgba(16,185,129,0.18)"
+                            : "rgba(255,255,255,0.05)"}`,
+                        }}
                       >
-                        <div className="flex items-start gap-3">
-                          {controversial ? (
-                            <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-                          ) : supported ? (
-                            <CheckCircle className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
-                          ) : (
-                            <XCircle className="w-4 h-4 text-slate-600 mt-0.5 shrink-0" />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-slate-200 leading-relaxed">
-                              {v.claim_text}
-                            </p>
-                            <div className="flex flex-wrap gap-2 mt-2.5">
-                              <span className="text-[11px] bg-[#1a1b25] rounded-md px-2 py-0.5 text-slate-400">
-                                Consensus{" "}
-                                <strong className="text-slate-200">
-                                  {((v.consensus_score ?? 0) * 100).toFixed(0)}%
-                                </strong>
+                        <div style={{ display: "flex", gap: 12 }}>
+                          {controversial
+                            ? <AlertTriangle style={{ width: 14, height: 14, color: "#fbbf24", flexShrink: 0, marginTop: 2 }} />
+                            : supported
+                            ? <CheckCircle  style={{ width: 14, height: 14, color: "#34d399",  flexShrink: 0, marginTop: 2 }} />
+                            : <XCircle     style={{ width: 14, height: 14, color: "#334155",  flexShrink: 0, marginTop: 2 }} />
+                          }
+                          <div style={{ flex: 1 }}>
+                            <p style={{ fontSize: 13, color: "#e2e8f0", lineHeight: 1.65 }}>{v.claim_text}</p>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                              <span style={{ fontSize: 11, background: "rgba(255,255,255,0.05)", borderRadius: 7, padding: "2px 9px", color: "#94a3b8" }}>
+                                Consensus <strong style={{ color: "#e2e8f0" }}>{((v.consensus_score ?? 0) * 100).toFixed(0)}%</strong>
                               </span>
-                              <span className="text-[11px] bg-[#1a1b25] rounded-md px-2 py-0.5 text-slate-400">
-                                S_p{" "}
-                                <strong className="text-slate-200">
-                                  {((v.provenance_score ?? 0) * 100).toFixed(0)}
-                                </strong>
+                              <span style={{ fontSize: 11, background: "rgba(255,255,255,0.05)", borderRadius: 7, padding: "2px 9px", color: "#94a3b8" }}>
+                                S_p <strong style={{ color: "#e2e8f0" }}>{((v.provenance_score ?? 0) * 100).toFixed(0)}</strong>
                               </span>
                               {(v.supports?.length ?? 0) > 0 && (
-                                <span className="text-[11px] text-emerald-500 font-medium">
-                                  {v.supports.length} support
-                                </span>
+                                <span style={{ fontSize: 11, color: "#34d399", fontWeight: 600 }}>{v.supports.length} support</span>
                               )}
                               {(v.refutes?.length ?? 0) > 0 && (
-                                <span className="text-[11px] text-red-400 font-medium">
-                                  {v.refutes.length} refute
-                                </span>
+                                <span style={{ fontSize: 11, color: "#f87171", fontWeight: 600 }}>{v.refutes.length} refute</span>
                               )}
                             </div>
                           </div>
@@ -388,10 +606,13 @@ export default function HomePage() {
 
             {/* Evidence map */}
             {(audit?.verdicts?.length ?? 0) > 0 && (
-              <div className="bg-[#111218] border border-[#2a2b38] rounded-2xl p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <Globe className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-widest">
+              <div style={{
+                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 20, padding: "28px 28px",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+                  <Globe style={{ width: 13, height: 13, color: "#34d399" }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#34d399", letterSpacing: "0.12em", textTransform: "uppercase" }}>
                     Evidence Map
                   </span>
                 </div>
@@ -401,23 +622,27 @@ export default function HomePage() {
           </section>
         )}
 
-        {/* ── Idle suggestions ── */}
+        {/* ── Suggestions ── */}
         {appState === "idle" && (
-          <div className="mt-14 text-center">
-            <p className="text-[11px] text-slate-600 uppercase tracking-widest mb-5">
+          <div className="animate-fade-in" style={{ marginTop: 52, textAlign: "center" }}>
+            <p style={{ fontSize: 11, color: "#1e293b", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 16 }}>
               Try asking
             </p>
-            <div className="flex flex-wrap justify-center gap-2 max-w-lg mx-auto">
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 8, maxWidth: 580, margin: "0 auto" }}>
               {SUGGESTIONS.map((s) => (
                 <button
                   key={s}
-                  onClick={() => {
-                    setQuery(s);
-                    inputRef.current?.focus();
+                  onClick={() => { setQuery(s); inputRef.current?.focus(); }}
+                  className="suggestion-chip"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6, fontSize: 12,
+                    color: "#334155", background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.06)", borderRadius: 999,
+                    padding: "8px 16px", cursor: "pointer",
+                    transition: "all 0.15s ease",
                   }}
-                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-emerald-400 bg-[#111218] hover:bg-emerald-500/[0.08] border border-[#2a2b38] hover:border-emerald-500/25 rounded-full px-3.5 py-1.5 transition-colors duration-150 cursor-pointer"
                 >
-                  <ArrowRight className="w-3 h-3" />
+                  <ArrowRight style={{ width: 11, height: 11 }} />
                   {s}
                 </button>
               ))}
