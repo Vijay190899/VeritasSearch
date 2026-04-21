@@ -72,9 +72,10 @@ def build_graph(
             }
         try:
             report = await reporter.synthesize(state["query"], state["audit_result"])
-            # Hard guard: if answer is unreasonably long, the LLM was hijacked —
-            # rebuild it from audit data directly.
-            if len(report.get("answer", "")) > 400:
+            # Hard guard: if answer is too long OR contains non-ASCII (injection artifacts),
+            # discard it and rebuild directly from audit data.
+            ans = report.get("answer", "")
+            if len(ans) > 300 or not ans.isascii():
                 from agents.reporter import _synthesize_answer
                 safe = _synthesize_answer("", state["audit_result"].get("verdicts", []))
                 report["answer"] = safe
