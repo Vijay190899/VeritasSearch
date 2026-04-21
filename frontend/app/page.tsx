@@ -81,18 +81,19 @@ function brainPos(ux: number, uy: number, uz: number): [number, number, number] 
   return [bx + (bx / L) * bump, by + (by / L) * bump, bz + (bz / L) * bump];
 }
 
-// ── Light-bulb shape (sphere top + tapered neck) ──────────────────────────────
+// ── Light-bulb shape (glass dome top, tapered neck bottom) ────────────────────
 function bulbPos(ux: number, uy: number, uz: number): [number, number, number] {
+  // Negate y so dome (positive uy) rises above center and neck descends below.
   if (uy >= -0.55) {
     const taper = uy < -0.10 ? 1 - (-uy - 0.10) * 0.50 : 1.0;
-    return [ux * 0.98 * taper, uy * 0.90 + 0.08, uz * 0.98 * taper];
+    return [ux * 0.98 * taper, -(uy * 0.90 + 0.08), uz * 0.98 * taper];
   }
   const angle = Math.atan2(uz, ux);
   const t = Math.min(1, (-uy - 0.55) / 0.45);
   const r = 0.26 - t * 0.08;
   const y = -0.52 - t * 0.55;
   const ridgeR = r + Math.sin(t * 14) * 0.015;
-  return [Math.cos(angle) * ridgeR, y, Math.sin(angle) * ridgeR];
+  return [Math.cos(angle) * ridgeR, -y, Math.sin(angle) * ridgeR];
 }
 
 function BrainSphere() {

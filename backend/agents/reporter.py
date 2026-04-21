@@ -88,8 +88,8 @@ class ReporterAgent:
             raw = resp.json().get("response", "").strip()
             # Truncate any runaway output at a natural sentence boundary
             answer_text = _trim_to_sentences(raw, max_sentences=6)
-        except Exception as exc:
-            answer_text = f"Report generation failed: {exc}"
+        except Exception:
+            answer_text = _synthesize_fallback(query, verdicts)
 
         import re as _re
         sentences = _re.split(r"(?<=[.!?])\s+", answer_text.strip())
@@ -103,6 +103,35 @@ class ReporterAgent:
             "verdicts": verdicts,
             "source_count": source_count,
         }
+
+
+def _synthesize_fallback(_query: str, verdicts: list[dict]) -> str:
+    """Build a plain-language answer from audit data when the LLM is unavailable."""
+    supporting = sum(len(v.get("supports", [])) for v in verdicts)
+    refuting = sum(len(v.get("refutes", [])) for v in verdicts)
+    total = supporting + refuting
+    if total == 0:
+        return (
+            "Evidence was gathered but could not be classified as directly "
+            "supporting or refuting the claims. Try a more specific query."
+        )
+    ratio = supporting / total
+    if ratio >= 0.75:
+        verdict_str = "YES — the majority of evidence supports this"
+    elif ratio >= 0.55:
+        verdict_str = "LIKELY — evidence leans toward support with some disagreement"
+    elif ratio >= 0.35:
+        verdict_str = "MIXED — evidence is split between supporting and refuting sources"
+    else:
+        verdict_str = "UNLIKELY — most evidence refutes this"
+    all_supports = list(dict.fromkeys(d for v in verdicts for d in v.get("supports", [])))[:3]
+    all_refutes = list(dict.fromkeys(d for v in verdicts for d in v.get("refutes", [])))[:2]
+    parts = [f"{verdict_str}."]
+    if all_supports:
+        parts.append(f"Supporting sources include: {', '.join(all_supports)}.")
+    if all_refutes:
+        parts.append(f"Refuting sources include: {', '.join(all_refutes)}.")
+    return " ".join(parts)
 
 
 def _trim_to_sentences(text: str, max_sentences: int) -> str:
