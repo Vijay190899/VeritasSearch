@@ -2,70 +2,99 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL = "phi3.5:latest"
 
+# No JSON example in the prompt — that confuses phi3.5.
+# format:"json" guarantees structurally valid JSON output.
 DECOMPOSE_PROMPT = """\
-You are a fact-checking assistant. Given a user query, decompose it into exactly 3 to 5 atomic, independently verifiable claims.
+You are a fact-checking assistant.
 
-Each claim must:
-- Be a single declarative sentence
-- Be falsifiable (can be proven true or false)
-- Be specific enough to search for
+Decompose the user query into exactly 3 short, independently verifiable claims.
 
-Return ONLY valid JSON in this exact format:
-{
-  "claims": [
-    {"id": "c1", "text": "...", "search_query": "..."},
-    {"id": "c2", "text": "...", "search_query": "..."},
-    {"id": "c3", "text": "...", "search_query": "..."}
-  ]
-}
+Return a JSON object with a "claims" array. Each claim must have:
+- "id": short string like "c1"
+- "text": one declarative sentence that can be proven true or false
+- "search_query": a concise web-search query to verify this claim
 
 User query: {query}
 """
 
 
-class Claim(BaseModel):
-    id: str
-    text: str
-    search_query: str
-
-
-class ClaimSet(BaseModel):
-    claims: list[Claim] = Field(default_factory=list)
-
-
 class PlannerAgent:
     def __init__(self, model: str = OLLAMA_MODEL) -> None:
         self.model = model
-        self._client = httpx.AsyncClient(base_url=OLLAMA_BASE_URL, timeout=60.0)
+        self._client = httpx.AsyncClient(base_url=OLLAMA_BASE_URL, timeout=120.0)
 
     async def decompose(self, query: str) -> list[dict[str, Any]]:
         prompt = DECOMPOSE_PROMPT.format(query=query)
         response = await self._client.post(
             "/api/generate",
-            json={"model": self.model, "prompt": prompt, "stream": False, "format": "json"},
+            json={
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",   # Forces valid JSON output
+            },
         )
         response.raise_for_status()
-        raw = response.json().get("response", "{}")
+        raw: str = response.json().get("response", "{}").strip()
+
         try:
-            parsed = ClaimSet(**json.loads(raw))
-        except (json.JSONDecodeError, ValueError):
-            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if not json_match:
-                return self._fallback_claims(query)
-            parsed = ClaimSet(**json.loads(json_match.group()))
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return self._fallback(query)
 
-        return [c.model_dump() for c in parsed.claims]
+        return self._extract(data, query)
 
-    def _fallback_claims(self, query: str) -> list[dict[str, Any]]:
+    def _extract(self, data: Any, query: str) -> list[dict[str, Any]]:
+        """Normalise whatever valid JSON structure the model returned."""
+        # Flatten: unwrap {"claims": [...]} or accept a bare list
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = None
+            for v in data.values():
+                if isinstance(v, list) and v:
+                    items = v
+                    break
+            if items is None:
+                return self._fallback(query)
+        else:
+            return self._fallback(query)
+
+        result: list[dict[str, Any]] = []
+        for i, item in enumerate(items):
+            if isinstance(item, str):
+                result.append({"id": f"c{i+1}", "text": item, "search_query": item})
+            elif isinstance(item, dict):
+                text = (
+                    item.get("text")
+                    or item.get("claim")
+                    or item.get("statement")
+                    or str(item)
+                )
+                sq = (
+                    item.get("search_query")
+                    or item.get("query")
+                    or item.get("search")
+                    or text
+                )
+                result.append({
+                    "id": str(item.get("id", f"c{i+1}")),
+                    "text": str(text),
+                    "search_query": str(sq),
+                })
+
+        # Drop claims where text is blank or clearly malformed (< 10 meaningful chars)
+        result = [c for c in result if len(c["text"].strip()) >= 10]
+        return result if result else self._fallback(query)
+
+    def _fallback(self, query: str) -> list[dict[str, Any]]:
         return [{"id": "c1", "text": query, "search_query": query}]
 
     async def aclose(self) -> None:

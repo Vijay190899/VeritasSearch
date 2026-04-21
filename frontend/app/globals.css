@@ -11,16 +11,19 @@
     box-sizing: border-box;
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
-    @apply bg-gray-950 text-gray-100;
+    background-color: #08090f;
+    color: #f1f5f9;
   }
 
-  /* Smooth focus rings for keyboard nav (WCAG 2.4.7) */
   :focus-visible {
-    @apply outline outline-2 outline-offset-2 outline-emerald-400;
+    @apply outline-none ring-2 ring-emerald-500 ring-offset-2 ring-offset-[#08090f];
   }
 
-  /* Respect reduced motion (WCAG 2.3.3) */
   @media (prefers-reduced-motion: reduce) {
     * {
       animation-duration: 0.01ms !important;

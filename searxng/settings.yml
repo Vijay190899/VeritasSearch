@@ -1,0 +1,49 @@
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "VeritasSearch"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "veritas-local-dev-secret-change-in-prod"
+  bind_address: "0.0.0.0"
+  port: 8080
+  base_url: "http://localhost:8888/"
+  limiter: false
+
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+  - name: bing
+    engine: bing
+    shortcut: b
+    disabled: false
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: d
+    disabled: false
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: w
+    disabled: false
+  - name: arxiv
+    engine: arxiv
+    shortcut: ax
+    disabled: false
+
+outgoing:
+  request_timeout: 10.0
+  max_request_timeout: 20.0
+  useragent_suffix: ""
+  pool_connections: 100
+  pool_maxsize: 20

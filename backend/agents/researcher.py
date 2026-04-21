@@ -66,11 +66,16 @@ class ResearcherAgent:
                         timeout=SCRAPE_TIMEOUT,
                     )
                 domain = urlparse(url).netloc
+                # Sanitise to ASCII-safe unicode to avoid cp1252 errors on Windows
+                raw_md = result.markdown or ""
+                content = raw_md.encode("utf-8", errors="replace").decode("utf-8")
+                title_raw = (result.metadata or {}).get("title", domain)
+                title = str(title_raw).encode("utf-8", errors="replace").decode("utf-8")
                 return EvidenceDocument(
                     url=url,
                     domain=domain,
-                    title=result.metadata.get("title", domain) if result.metadata else domain,
-                    content=result.markdown or "",
+                    title=title,
+                    content=content,
                     claim_id=claim_id,
                 )
             except Exception as exc:

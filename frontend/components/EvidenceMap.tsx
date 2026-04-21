@@ -7,9 +7,9 @@ interface EvidenceMapProps {
   verdicts: ClaimVerdict[];
 }
 
-const CLAIM_COLORS = ["#10b981", "#3b82f6", "#a855f7", "#f59e0b", "#ec4899"];
+const CLAIM_COLORS = ["#10b981", "#6366f1", "#a855f7", "#f59e0b", "#ec4899"];
 const CANVAS_W = 800;
-const CANVAS_H = 340;
+const CANVAS_H = 360;
 
 function buildGraph(verdicts: ClaimVerdict[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes: GraphNode[] = [];
@@ -17,7 +17,7 @@ function buildGraph(verdicts: ClaimVerdict[]): { nodes: GraphNode[]; edges: Grap
   const domainSeen = new Set<string>();
 
   for (const v of verdicts) {
-    nodes.push({ id: v.claim_id, label: v.claim_text.slice(0, 48) + "…", type: "claim" });
+    nodes.push({ id: v.claim_id, label: v.claim_text.slice(0, 48) + (v.claim_text.length > 48 ? "…" : ""), type: "claim" });
 
     for (const domain of v.supports) {
       if (!domainSeen.has(domain)) {
@@ -37,20 +37,15 @@ function buildGraph(verdicts: ClaimVerdict[]): { nodes: GraphNode[]; edges: Grap
   return { nodes, edges };
 }
 
-function layoutNodes(
-  nodes: GraphNode[],
-  verdicts: ClaimVerdict[]
-): Map<string, { x: number; y: number }> {
+function layoutNodes(nodes: GraphNode[], verdicts: ClaimVerdict[]): Map<string, { x: number; y: number }> {
   const positions = new Map<string, { x: number; y: number }>();
   const claimCount = verdicts.length;
 
-  // Claims in a horizontal row at y=50%
   verdicts.forEach((v, i) => {
     const x = ((i + 1) / (claimCount + 1)) * CANVAS_W;
     positions.set(v.claim_id, { x, y: CANVAS_H / 2 });
   });
 
-  // Domain nodes arranged around their claim
   const domainsByClaimId: Record<string, string[]> = {};
   for (const v of verdicts) {
     domainsByClaimId[v.claim_id] = [...v.supports, ...v.refutes];
@@ -62,7 +57,7 @@ function layoutNodes(
     domains.forEach((domain, i) => {
       if (positions.has(domain)) return;
       const angle = (Math.PI / (domains.length + 1)) * (i + 1);
-      const radius = 110;
+      const radius = 115;
       const side = i % 2 === 0 ? 1 : -1;
       positions.set(domain, {
         x: claimPos.x + Math.cos(angle) * radius * side,
@@ -79,29 +74,58 @@ export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
   const positions = useMemo(() => layoutNodes(nodes, verdicts), [nodes, verdicts]);
 
   if (verdicts.length === 0) {
-    return <p className="text-sm text-gray-500 text-center py-8">No evidence to display.</p>;
+    return (
+      <p className="text-sm text-gray-600 text-center py-10">
+        No evidence to display.
+      </p>
+    );
   }
 
   return (
     <div
-      className="w-full overflow-x-auto rounded-xl"
+      className="w-full overflow-x-auto"
       role="img"
-      aria-label="Evidence graph showing source domains linked to verified claims"
+      aria-label="Evidence graph: source domains linked to verified claims"
     >
       <svg
         viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
         width="100%"
         height={CANVAS_H}
-        className="bg-gray-950/60 rounded-xl"
+        className="rounded-xl"
+        style={{ background: "rgba(255,255,255,0.02)" }}
         aria-hidden="true"
       >
         <defs>
-          <marker id="arrow-support" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L6,3 z" fill="#10b981" />
+          {/* Arrow markers */}
+          <marker id="arrow-support" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+            <path d="M0,0 L0,7 L7,3.5 z" fill="#10b981" opacity="0.8" />
           </marker>
-          <marker id="arrow-refute" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L6,3 z" fill="#ef4444" />
+          <marker id="arrow-refute" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+            <path d="M0,0 L0,7 L7,3.5 z" fill="#ef4444" opacity="0.8" />
           </marker>
+
+          {/* Glow filters */}
+          <filter id="glow-green" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="4" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="glow-red" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="4" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="glow-claim" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
 
         {/* Edges */}
@@ -110,16 +134,25 @@ export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
           const tgt = positions.get(e.target);
           if (!src || !tgt) return null;
           const isSupport = e.stance === "SUPPORTS";
+          const color = isSupport ? "#10b981" : "#ef4444";
+          const dx = tgt.x - src.x;
+          const dy = tgt.y - src.y;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          const ux = dx / len;
+          const uy = dy / len;
+          const endX = tgt.x - ux * 22;
+          const endY = tgt.y - uy * 22;
+
           return (
             <line
               key={i}
               x1={src.x}
               y1={src.y}
-              x2={tgt.x}
-              y2={tgt.y}
-              stroke={isSupport ? "#10b981" : "#ef4444"}
-              strokeWidth={1.5}
-              strokeOpacity={0.5}
+              x2={endX}
+              y2={endY}
+              stroke={color}
+              strokeWidth="1.5"
+              strokeOpacity="0.35"
               markerEnd={isSupport ? "url(#arrow-support)" : "url(#arrow-refute)"}
             />
           );
@@ -129,50 +162,70 @@ export default function EvidenceMap({ verdicts }: EvidenceMapProps) {
         {nodes.map((node) => {
           const pos = positions.get(node.id);
           if (!pos) return null;
-
           const isClaim = node.type === "claim";
           const claimIndex = verdicts.findIndex((v) => v.claim_id === node.id);
           const claimColor = isClaim ? CLAIM_COLORS[claimIndex % CLAIM_COLORS.length] : undefined;
           const domainColor = node.stance === "SUPPORTS" ? "#10b981" : "#ef4444";
+          const fill = isClaim ? (claimColor! + "20") : (domainColor + "18");
+          const stroke = isClaim ? claimColor! : domainColor;
 
           return (
-            <g key={node.id} transform={`translate(${pos.x}, ${pos.y})`}>
+            <g key={node.id} transform={`translate(${pos.x},${pos.y})`}>
               {isClaim ? (
-                <rect
-                  x={-60}
-                  y={-18}
-                  width={120}
-                  height={36}
-                  rx={8}
-                  fill={claimColor! + "22"}
-                  stroke={claimColor}
-                  strokeWidth={1.5}
-                />
+                <>
+                  <rect
+                    x={-65}
+                    y={-20}
+                    width={130}
+                    height={40}
+                    rx={10}
+                    fill={fill}
+                    stroke={stroke}
+                    strokeWidth="1.5"
+                    filter="url(#glow-claim)"
+                  />
+                  <text
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="#e5e7eb"
+                    fontSize={9}
+                    fontFamily="var(--font-mono), monospace"
+                  >
+                    {node.label.slice(0, 28)}
+                  </text>
+                </>
               ) : (
-                <circle r={20} fill={domainColor + "22"} stroke={domainColor} strokeWidth={1.5} />
+                <>
+                  <circle
+                    r={22}
+                    fill={fill}
+                    stroke={stroke}
+                    strokeWidth="1.5"
+                    filter={node.stance === "SUPPORTS" ? "url(#glow-green)" : "url(#glow-red)"}
+                  />
+                  <text
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="#d1d5db"
+                    fontSize={8}
+                    fontFamily="var(--font-mono), monospace"
+                  >
+                    {node.label.slice(0, 14)}
+                  </text>
+                </>
               )}
-              <text
-                textAnchor="middle"
-                dominantBaseline="central"
-                fill="#e5e7eb"
-                fontSize={isClaim ? 9 : 8}
-                fontFamily="monospace"
-              >
-                {node.label.slice(0, isClaim ? 24 : 18)}
-              </text>
             </g>
           );
         })}
       </svg>
 
-      {/* Legend */}
-      <div className="flex gap-5 mt-3 px-2 text-xs text-gray-500">
+      <div className="flex gap-5 mt-3 px-1 text-xs text-gray-600">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500/30 border border-emerald-500" />
+          <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500/25 border border-emerald-500/60" aria-hidden="true" />
           Supports claim
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-3 rounded-full bg-red-500/30 border border-red-500" />
+          <span className="inline-block w-3 h-3 rounded-full bg-red-500/25 border border-red-500/60" aria-hidden="true" />
           Refutes claim
         </span>
       </div>
