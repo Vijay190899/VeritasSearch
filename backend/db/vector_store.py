@@ -1,13 +1,12 @@
 """Ephemeral ChromaDB vector store for per-session evidence storage."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import chromadb
 from chromadb.config import Settings
 
-if TYPE_CHECKING:
-    from agents.researcher import EvidenceDocument
+from models import EvidenceDocument
 
 
 class VectorStore:
@@ -26,7 +25,7 @@ class VectorStore:
             metadata={"hnsw:space": "cosine"},
         )
 
-    async def upsert_documents(self, docs: list["EvidenceDocument"]) -> None:
+    async def upsert_documents(self, docs: list[EvidenceDocument]) -> None:
         if not docs:
             return
 

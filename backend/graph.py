@@ -4,12 +4,14 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from agents.planner import PlannerAgent
 from agents.researcher import ResearcherAgent
 from agents.auditor import AuditorAgent
 from agents.reporter import ReporterAgent
 from db.vector_store import VectorStore
+from models import EvidenceDocument
 
 
 class VeritasState(TypedDict):
@@ -17,7 +19,7 @@ class VeritasState(TypedDict):
     session_id: str
     max_sources: int
     claims: list[dict[str, Any]]
-    evidence: list[Any]
+    evidence: list[EvidenceDocument]      # typed — not list[Any]
     audit_result: dict[str, Any]
     report: dict[str, Any]
     error: str | None
@@ -28,52 +30,54 @@ def build_graph(
     researcher: ResearcherAgent,
     auditor: AuditorAgent,
     reporter: ReporterAgent,
-) -> StateGraph:
-    graph = StateGraph(VeritasState)
+) -> CompiledStateGraph:
+    """Compile the LangGraph pipeline from pre-constructed agent instances.
 
-    async def plan_node(state: VeritasState) -> VeritasState:
+    Agents are injected so callers can supply per-request VectorStore instances,
+    enabling ephemeral ChromaDB isolation between requests.
+    """
+    graph: StateGraph = StateGraph(VeritasState)
+
+    async def plan_node(state: VeritasState) -> dict[str, Any]:
         try:
             claims = await planner.decompose(state["query"])
-            return {**state, "claims": claims, "error": None}
+            return {"claims": claims, "error": None}
         except Exception as exc:
-            return {**state, "claims": [], "error": str(exc)}
+            return {"claims": [], "error": str(exc)}
 
-    async def research_node(state: VeritasState) -> VeritasState:
+    async def research_node(state: VeritasState) -> dict[str, Any]:
         if state.get("error") or not state["claims"]:
-            return state
+            return {"evidence": []}
         try:
             evidence = await researcher.gather(
                 state["claims"], max_sources=state.get("max_sources", 10)
             )
-            return {**state, "evidence": evidence}
+            return {"evidence": evidence}
         except Exception as exc:
-            return {**state, "evidence": [], "error": str(exc)}
+            return {"evidence": [], "error": str(exc)}
 
-    async def audit_node(state: VeritasState) -> VeritasState:
+    async def audit_node(state: VeritasState) -> dict[str, Any]:
         if state.get("error"):
-            return state
+            return {"audit_result": {}}
         try:
             audit_result = await auditor.evaluate(state["claims"], state["evidence"])
-            return {**state, "audit_result": audit_result}
+            return {"audit_result": audit_result}
         except Exception as exc:
-            return {**state, "audit_result": {}, "error": str(exc)}
+            return {"audit_result": {}, "error": str(exc)}
 
-    async def report_node(state: VeritasState) -> VeritasState:
+    async def report_node(state: VeritasState) -> dict[str, Any]:
         if state.get("error"):
             return {
-                **state,
-                "report": {"answer": f"Error: {state['error']}", "trust_score": 0.0},
+                "report": {"answer": f"Error: {state['error']}", "trust_score": 0.0}
             }
         try:
             report = await reporter.synthesize(state["query"], state["audit_result"])
-            return {**state, "report": report}
+            return {"report": report}
         except Exception as exc:
-            return {**state, "report": {"answer": f"Report error: {exc}", "trust_score": 0.0}}
+            return {"report": {"answer": f"Report error: {exc}", "trust_score": 0.0}}
 
     def route_after_research(state: VeritasState) -> str:
-        if not state.get("evidence"):
-            return "report"
-        return "audit"
+        return "audit" if state.get("evidence") else "report"
 
     graph.add_node("plan", plan_node)
     graph.add_node("research", research_node)
@@ -82,8 +86,33 @@ def build_graph(
 
     graph.set_entry_point("plan")
     graph.add_edge("plan", "research")
-    graph.add_conditional_edges("research", route_after_research, {"audit": "audit", "report": "report"})
+    graph.add_conditional_edges(
+        "research",
+        route_after_research,
+        {"audit": "audit", "report": "report"},
+    )
     graph.add_edge("audit", "report")
     graph.add_edge("report", END)
 
     return graph.compile()
+
+
+def create_pipeline(session_id: str) -> tuple[CompiledStateGraph, VectorStore]:
+    """Factory: wire agents + ephemeral VectorStore and return (graph, store).
+
+    Callers must call `store.cleanup()` after consuming the final state.
+
+    Usage::
+
+        pipeline, store = create_pipeline(session_id)
+        final = await pipeline.ainvoke(initial_state)
+        store.cleanup()
+    """
+    store = VectorStore(session_id)
+    pipeline = build_graph(
+        planner=PlannerAgent(),
+        researcher=ResearcherAgent(store),
+        auditor=AuditorAgent(store),
+        reporter=ReporterAgent(),
+    )
+    return pipeline, store

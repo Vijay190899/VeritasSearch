@@ -9,8 +9,8 @@ from typing import Any
 
 import httpx
 
-from agents.researcher import EvidenceDocument
 from db.vector_store import VectorStore
+from models import EvidenceDocument
 from logic.scoring import ProvenanceScorer
 from logic.ai_detector import AiFlatenessDetector
 
@@ -107,8 +107,8 @@ class AuditorAgent:
         return verdict
 
     async def _audit_document(self, claim_text: str, doc: EvidenceDocument) -> dict[str, Any]:
-        snippet = " ".join(doc.content.split()[:800])
-        prompt = AUDIT_PROMPT.format(claim_text=claim_text, snippet=snippet)
+        prompt = AUDIT_PROMPT.format(claim_text=claim_text, snippet=doc.snippet(800))
+        raw = "{}"
         try:
             resp = await self._client.post(
                 "/api/generate",
@@ -116,12 +116,12 @@ class AuditorAgent:
             )
             resp.raise_for_status()
             raw = resp.json().get("response", "{}")
-            return json.loads(raw)
+            return json.loads(raw)  # type: dict[str, Any]
         except Exception:
-            match = re.search(r'\{.*?\}', raw if 'raw' in dir() else '{}', re.DOTALL)
+            match = re.search(r"\{.*?\}", raw, re.DOTALL)
             if match:
                 try:
-                    return json.loads(match.group())
+                    return cast(dict[str, Any], json.loads(match.group()))
                 except json.JSONDecodeError:
                     pass
             return {"verdict": "IRRELEVANT", "confidence": 0.0, "quote": ""}

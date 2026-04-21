@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-import asyncio
+import json
 import uuid
 from typing import AsyncIterator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from agents.planner import PlannerAgent
-from agents.researcher import ResearcherAgent
-from agents.auditor import AuditorAgent
-from agents.reporter import ReporterAgent
-from db.vector_store import VectorStore
+from graph import VeritasState, create_pipeline
 
 app = FastAPI(title="VeritasSearch Engine", version="1.0.0")
 
@@ -31,55 +27,73 @@ class QueryRequest(BaseModel):
     max_sources: int = 10
 
 
-class VerificationSession:
-    """Holds per-request ephemeral state."""
-
-    def __init__(self, session_id: str) -> None:
-        self.session_id = session_id
-        self.vector_store = VectorStore(session_id)
-        self.planner = PlannerAgent()
-        self.researcher = ResearcherAgent(self.vector_store)
-        self.auditor = AuditorAgent(self.vector_store)
-        self.reporter = ReporterAgent()
+def _initial_state(query: str, session_id: str, max_sources: int) -> VeritasState:
+    return VeritasState(
+        query=query,
+        session_id=session_id,
+        max_sources=max_sources,
+        claims=[],
+        evidence=[],
+        audit_result={},
+        report={},
+        error=None,
+    )
 
 
 @app.post("/api/verify")
 async def verify_query(req: QueryRequest) -> dict:
     session_id = str(uuid.uuid4())
-    session = VerificationSession(session_id)
+    pipeline, store = create_pipeline(session_id)
+    try:
+        final: VeritasState = await pipeline.ainvoke(
+            _initial_state(req.query, session_id, req.max_sources)
+        )
+    finally:
+        store.cleanup()
 
-    claims = await session.planner.decompose(req.query)
-    evidence = await session.researcher.gather(claims, max_sources=req.max_sources)
-    audit_result = await session.auditor.evaluate(claims, evidence)
-    report = await session.reporter.synthesize(req.query, audit_result)
-
-    session.vector_store.cleanup()
-    return {"session_id": session_id, "report": report, "audit": audit_result}
+    return {
+        "session_id": session_id,
+        "report": final["report"],
+        "audit": final["audit_result"],
+    }
 
 
 @app.post("/api/verify/stream")
 async def verify_stream(req: QueryRequest) -> StreamingResponse:
     session_id = str(uuid.uuid4())
-    session = VerificationSession(session_id)
 
     async def event_stream() -> AsyncIterator[str]:
-        yield f"data: {{\"event\": \"session_start\", \"session_id\": \"{session_id}\"}}\n\n"
+        pipeline, store = create_pipeline(session_id)
+        try:
+            yield _sse("session_start", {"session_id": session_id})
 
-        claims = await session.planner.decompose(req.query)
-        yield f"data: {{\"event\": \"claims\", \"data\": {claims}}}\n\n"
+            # LangGraph native streaming — one event per node completion
+            async for event in pipeline.astream_events(
+                _initial_state(req.query, session_id, req.max_sources),
+                version="v2",
+            ):
+                kind = event.get("event")
+                name = event.get("name", "")
 
-        evidence = await session.researcher.gather(claims, max_sources=req.max_sources)
-        yield f"data: {{\"event\": \"evidence_ready\", \"count\": {len(evidence)}}}\n\n"
+                if kind == "on_chain_end" and name == "plan":
+                    claims = event["data"]["output"].get("claims", [])
+                    yield _sse("claims", {"data": claims, "count": len(claims)})
 
-        audit_result = await session.auditor.evaluate(claims, evidence)
-        import json
-        yield f"data: {{\"event\": \"audit_complete\", \"data\": {json.dumps(audit_result)}}}\n\n"
+                elif kind == "on_chain_end" and name == "research":
+                    evidence = event["data"]["output"].get("evidence", [])
+                    yield _sse("evidence_ready", {"count": len(evidence)})
 
-        report = await session.reporter.synthesize(req.query, audit_result)
-        yield f"data: {{\"event\": \"report\", \"data\": {json.dumps(report)}}}\n\n"
+                elif kind == "on_chain_end" and name == "audit":
+                    audit = event["data"]["output"].get("audit_result", {})
+                    yield _sse("audit_complete", {"data": audit})
 
-        session.vector_store.cleanup()
-        yield "data: {\"event\": \"done\"}\n\n"
+                elif kind == "on_chain_end" and name == "report":
+                    report = event["data"]["output"].get("report", {})
+                    yield _sse("report", {"data": report})
+
+            yield _sse("done", {})
+        finally:
+            store.cleanup()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -87,3 +101,7 @@ async def verify_stream(req: QueryRequest) -> StreamingResponse:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+def _sse(event: str, payload: dict) -> str:
+    return f"data: {json.dumps({'event': event, **payload})}\n\n"

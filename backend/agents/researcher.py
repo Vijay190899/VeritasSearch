@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
@@ -10,26 +9,11 @@ import httpx
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 
 from db.vector_store import VectorStore
+from models import EvidenceDocument
 
 SEARXNG_URL = "http://localhost:8888/search"
 MAX_CONCURRENT_SCRAPES = 5
 SCRAPE_TIMEOUT = 20.0
-
-
-@dataclass
-class EvidenceDocument:
-    url: str
-    domain: str
-    title: str
-    content: str
-    claim_id: str
-    word_count: int = 0
-    is_https: bool = False
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self.word_count = len(self.content.split())
-        self.is_https = self.url.startswith("https://")
 
 
 class ResearcherAgent:
