@@ -103,8 +103,12 @@ class ResearcherAgent:
     async def _scrape(self, url: str, claim_id: str) -> EvidenceDocument | Exception:
         async with self._semaphore:
             try:
-                config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS, word_count_threshold=50)
-                async with AsyncWebCrawler() as crawler:
+                config = CrawlerRunConfig(
+                    cache_mode=CacheMode.BYPASS,
+                    word_count_threshold=50,
+                    verbose=False,
+                )
+                async with AsyncWebCrawler(verbose=False) as crawler:
                     result = await asyncio.wait_for(
                         crawler.arun(url=url, config=config),
                         timeout=SCRAPE_TIMEOUT,

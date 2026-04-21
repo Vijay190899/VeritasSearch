@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 import uuid
 from typing import AsyncIterator
+
+# Force UTF-8 stdout/stderr on Windows so crawl4ai logging never crashes the process.
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
